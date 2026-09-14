@@ -2,7 +2,7 @@
 
 A lightweight, keyboard-first clipboard manager for GNOME, inspired by
 [Maccy](https://github.com/p0deje/Maccy). Press **Shift+Super+C**, type to
-search, press **Enter** to paste.
+search, press **Enter** to copy, then paste wherever you like.
 
 Laccy is an independent project. It is not affiliated with Maccy and doesn't
 share any code with it.
@@ -84,8 +84,8 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Shift+Super+C | Open or close Laccy |
 | Type anything | Search |
 | ↑ / ↓ | Move the selection |
-| Enter / click | Paste the item (copy only, if `paste_automatically = false`) |
-| Alt+Enter | The opposite of Enter: copy only, or paste |
+| Enter / click | Copy the item (and paste it, if `paste_automatically = true`) |
+| Alt+Enter | The opposite of Enter: copy and paste, or copy only |
 | Ctrl+1 … Ctrl+9 | Pick the first nine items |
 | Alt+P | Pin or unpin (pinned items stay at the top) |
 | Alt+Delete | Delete the item |
@@ -106,8 +106,8 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@laccy.github.i
 ```ini
 # Unpinned items to keep
 history_size = 200
-# Paste into the focused app after picking an item
-paste_automatically = true
+# Also paste into the focused app after picking an item (default: copy only)
+paste_automatically = false
 # Desktop app IDs whose copies are never recorded
 ignored_apps = org.keepassxc.KeePassXC.desktop, com.bitwarden.desktop.desktop
 # Larger copies are not recorded
@@ -116,7 +116,7 @@ max_item_bytes = 1048576
 
 ## Known limitations
 
-- **Terminals** paste with Ctrl+Shift+V, so auto-paste doesn't work there yet. Use Alt+Enter and paste yourself.
+- **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or `paste_automatically = true`) doesn't work there yet.
 - **Text only.** Images and files are not recorded yet.
 - The popup opens where GNOME places new windows (Wayland apps can't choose their own position).
 

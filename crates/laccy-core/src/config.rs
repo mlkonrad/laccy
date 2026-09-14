@@ -7,7 +7,8 @@ use std::path::Path;
 pub struct Config {
     /// Number of unpinned items kept in history.
     pub history_size: usize,
-    /// Paste into the focused app after picking an item. Alt+Enter does the opposite.
+    /// Also paste into the focused app after picking an item, instead of only
+    /// copying it. Alt+Enter does the opposite.
     pub paste_automatically: bool,
     /// Desktop app IDs whose copies are never recorded, e.g. `org.keepassxc.KeePassXC.desktop`.
     pub ignored_apps: Vec<String>,
@@ -19,7 +20,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             history_size: 200,
-            paste_automatically: true,
+            paste_automatically: false,
             ignored_apps: Vec::new(),
             max_item_bytes: 1024 * 1024,
         }
@@ -101,11 +102,11 @@ mod tests {
     #[test]
     fn parses_all_keys() {
         let config = Config::parse(
-            "history_size = 50\npaste_automatically=false\nmax_item_bytes = 10\n\
+            "history_size = 50\npaste_automatically=true\nmax_item_bytes = 10\n\
              ignored_apps = org.keepassxc.KeePassXC.desktop, ,com.bitwarden.desktop.desktop\n",
         );
         assert_eq!(config.history_size, 50);
-        assert!(!config.paste_automatically);
+        assert!(config.paste_automatically);
         assert_eq!(config.max_item_bytes, 10);
         assert!(config.is_ignored("com.bitwarden.desktop.desktop"));
         assert!(!config.is_ignored(""));
