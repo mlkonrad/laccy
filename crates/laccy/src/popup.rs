@@ -219,7 +219,7 @@ impl Popup {
 
     fn apply_filter(&self) {
         let objects = self.objects.borrow();
-        let matches: Vec<glib::BoxedAnyObject> = search::rank(&self.haystacks.borrow(), &self.search.text())
+        let matches: Vec<glib::BoxedAnyObject> = search::rank(&self.haystacks.borrow(), &self.search.text(), self.config.search_mode)
             .into_iter()
             .map(|index| objects[index].clone())
             .collect();

@@ -4,8 +4,10 @@
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
-    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, PASTE_AUTOMATICALLY_KEY, SHOW_INDICATOR_KEY, TOGGLE_SHORTCUT_KEY,
+    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, PASTE_AUTOMATICALLY_KEY, SEARCH_MODE_KEY, SHOW_INDICATOR_KEY,
+    TOGGLE_SHORTCUT_KEY,
 };
+use laccy_core::search;
 
 const WINDOW_NAME: &str = "laccy-preferences";
 
@@ -97,6 +99,32 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         .build();
     settings.bind(PASTE_AUTOMATICALLY_KEY, &paste_row, "active").build();
     group.add(&paste_row);
+
+    let mode_labels: Vec<&str> = search::Mode::ALL
+        .iter()
+        .map(|mode| match mode {
+            search::Mode::Exact => "Exact",
+            search::Mode::Fuzzy => "Fuzzy",
+        })
+        .collect();
+    let search_row = adw::ComboRow::builder()
+        .title("Search Mode")
+        .subtitle("Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”")
+        .model(&gtk::StringList::new(&mode_labels))
+        .build();
+    settings
+        .bind(SEARCH_MODE_KEY, &search_row, "selected")
+        .mapping(|variant, _| {
+            let mode = search::Mode::from_name(variant.str()?)?;
+            let position = search::Mode::ALL.iter().position(|&other| other == mode)?;
+            Some((position as u32).to_value())
+        })
+        .set_mapping(|value, _| {
+            let mode = search::Mode::ALL.get(value.get::<u32>().ok()? as usize)?;
+            Some(mode.name().to_variant())
+        })
+        .build();
+    group.add(&search_row);
 
     let indicator_row = adw::SwitchRow::builder()
         .title("Show Icon in Top Bar")

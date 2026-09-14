@@ -24,6 +24,15 @@
       <summary>Ignored apps</summary>
       <description>Desktop app IDs whose copies are never recorded, e.g. org.keepassxc.KeePassXC.desktop.</description>
     </key>
+    <key name="search-mode" type="s">
+      <choices>
+        <choice value="exact"/>
+        <choice value="fuzzy"/>
+      </choices>
+      <default>'exact'</default>
+      <summary>Search mode</summary>
+      <description>How the popup matches what you type. "exact" matches each word as written; "fuzzy" also matches its letters in order with gaps, so "gco" finds "git checkout".</description>
+    </key>
     <key name="show-indicator" type="b">
       <default>true</default>
       <summary>Show icon in top bar</summary>

@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use gio::prelude::*;
 
+use crate::search;
+
 pub const SCHEMA_ID: &str = "org.gnome.shell.extensions.laccy";
 pub const EXTENSION_UUID: &str = "laccy@mlkonrad.github.com";
 
@@ -14,6 +16,7 @@ pub const PASTE_AUTOMATICALLY_KEY: &str = "paste-automatically";
 pub const HISTORY_SIZE_KEY: &str = "history-size";
 pub const IGNORED_APPS_KEY: &str = "ignored-apps";
 pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
+pub const SEARCH_MODE_KEY: &str = "search-mode";
 /// Only read by the extension, which adds or removes its top bar icon.
 pub const SHOW_INDICATOR_KEY: &str = "show-indicator";
 
@@ -28,6 +31,8 @@ pub struct Config {
     pub ignored_apps: Vec<String>,
     /// Copies larger than this are not recorded.
     pub max_item_bytes: usize,
+    /// How the popup matches the search query.
+    pub search_mode: search::Mode,
 }
 
 /// Used when the schema can't be found. Must match the schema's defaults,
@@ -39,6 +44,7 @@ impl Default for Config {
             paste_automatically: false,
             ignored_apps: Vec::new(),
             max_item_bytes: 1024 * 1024,
+            search_mode: search::Mode::Exact,
         }
     }
 }
@@ -55,6 +61,7 @@ impl Config {
             paste_automatically: settings.boolean(PASTE_AUTOMATICALLY_KEY),
             ignored_apps: settings.strv(IGNORED_APPS_KEY).iter().map(ToString::to_string).collect(),
             max_item_bytes: settings.uint(MAX_ITEM_BYTES_KEY) as usize,
+            search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
         }
     }
 
@@ -137,17 +144,29 @@ mod tests {
         settings.set_uint(HISTORY_SIZE_KEY, 50).unwrap();
         settings.set_boolean(PASTE_AUTOMATICALLY_KEY, true).unwrap();
         settings.set_strv(IGNORED_APPS_KEY, ["org.keepassxc.KeePassXC.desktop"]).unwrap();
+        settings.set_string(SEARCH_MODE_KEY, "fuzzy").unwrap();
 
         let config = Config::from_settings(&settings);
         assert_eq!(config.history_size, 50);
         assert!(config.paste_automatically);
+        assert_eq!(config.search_mode, search::Mode::Fuzzy);
         assert!(config.is_ignored("org.keepassxc.KeePassXC.desktop"));
         assert!(!config.is_ignored(""));
     }
 
     #[test]
-    fn history_size_range_is_enforced() {
+    fn invalid_values_are_rejected() {
         let settings = test_settings();
         assert!(settings.set_uint(HISTORY_SIZE_KEY, 0).is_err());
+        assert!(settings.set_string(SEARCH_MODE_KEY, "sloppy").is_err());
+    }
+
+    #[test]
+    fn schema_lists_every_search_mode() {
+        let settings = test_settings();
+        for mode in search::Mode::ALL {
+            settings.set_string(SEARCH_MODE_KEY, mode.name()).unwrap();
+            assert_eq!(Config::from_settings(&settings).search_mode, mode);
+        }
     }
 }
