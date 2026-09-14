@@ -40,6 +40,10 @@ impl Popup {
             }
         };
         let popup = Rc::new(Self::build(app, history, Config::load()));
+        // Signal handlers only hold weak references, so the window has to keep
+        // the popup alive; otherwise every handler silently does nothing.
+        let keep_alive = RefCell::new(Some(Rc::clone(&popup)));
+        popup.window.connect_destroy(move |_| drop(keep_alive.take()));
         popup.connect_signals();
         popup.reload();
         popup.check_extension();

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.laccy" path="/org/gnome/shell/extensions/laccy/">
-    <key name="toggle-shortcut" type="as">
+    <!-- Keybinding names are global across all extensions, so this one is prefixed. -->
+    <key name="laccy-toggle-shortcut" type="as">
       <default><![CDATA[['<Shift><Super>c']]]></default>
       <summary>Open Laccy</summary>
       <description>Opens the clipboard history popup, or closes it when it is focused.</description>

@@ -85,7 +85,7 @@ To change the shortcut:
 
 ```sh
 gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@laccy.github.io/schemas \
-  set org.gnome.shell.extensions.laccy toggle-shortcut "['<Super>v']"
+  set org.gnome.shell.extensions.laccy laccy-toggle-shortcut "['<Super>v']"
 ```
 
 ## Configuration

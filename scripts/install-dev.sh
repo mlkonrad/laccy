@@ -23,6 +23,8 @@ ln -sfn "$root/extension/$uuid" "$data_dir/gnome-shell/extensions/$uuid"
 
 # Restart the daemon on the new binary; D-Bus activation starts it again on the next copy.
 pkill -x laccyd || true
+# An open popup is a single instance that would keep answering the shortcut with the old binary.
+pkill -x laccy || true
 busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null 2>&1 || true
 
 if gnome-extensions info "$uuid" >/dev/null 2>&1; then

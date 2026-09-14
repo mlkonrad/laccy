@@ -16,6 +16,10 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const APP_DESKTOP_ID = 'io.github.laccy.Laccy.desktop';
 
+// Keybinding names are shared by all extensions (Caffeine also has a
+// "toggle-shortcut"), so ours needs a prefix or GNOME refuses to add it.
+const TOGGLE_SHORTCUT_KEY = 'laccy-toggle-shortcut';
+
 const DAEMON_BUS_NAME = 'io.github.laccy.Laccy.Daemon';
 const DAEMON_OBJECT_PATH = '/io/github/laccy/Laccy/Daemon';
 const DAEMON_INTERFACE = 'io.github.laccy.Daemon1';
@@ -59,14 +63,14 @@ export default class LaccyExtension extends Extension {
         this._dbus = Gio.DBusExportedObject.wrapJSObject(SHELL_INTERFACE_XML, this);
         this._dbus.export(Gio.DBus.session, SHELL_OBJECT_PATH);
 
-        Main.wm.addKeybinding('toggle-shortcut', this._settings,
+        Main.wm.addKeybinding(TOGGLE_SHORTCUT_KEY, this._settings,
             Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
             () => this._togglePopup());
     }
 
     disable() {
-        Main.wm.removeKeybinding('toggle-shortcut');
+        Main.wm.removeKeybinding(TOGGLE_SHORTCUT_KEY);
 
         this._dbus.unexport();
         this._dbus = null;
