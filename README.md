@@ -39,6 +39,17 @@ or type keys. Laccy is therefore three small parts:
 thing that stays running, and the popup loads only a 10,000-character excerpt
 of each item.
 
+The popup renders with GTK's Cairo renderer instead of the GPU. Measured on
+GNOME 50 with 200 items (median of warm launches):
+
+| Renderer | Startup CPU | Resident memory | Private memory |
+|---|---|---|---|
+| Vulkan (GTK default) | 515 ms | 180 MB | 54 MB |
+| OpenGL | 415 ms | 150 MB | 43 MB |
+| **Cairo (Laccy default)** | **300 ms** | **60 MB** | **17 MB** |
+
+Set `GSK_RENDERER` to override it. `laccyd` uses about 9 MB resident, 0.7 MB private.
+
 **Privacy:** copies marked as secret by password managers
 (`x-kde-passwordManagerHint`) are never recorded, and you can ignore whole
 apps (see [Configuration](#configuration)). Nothing is recorded while the
