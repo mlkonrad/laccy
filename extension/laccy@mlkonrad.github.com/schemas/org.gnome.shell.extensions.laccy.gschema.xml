@@ -13,6 +13,11 @@
       <summary>Paste automatically</summary>
       <description>Also paste into the focused app after picking an item, instead of only copying it. Alt+Enter does the opposite.</description>
     </key>
+    <key name="paste-without-formatting" type="b">
+      <default>false</default>
+      <summary>Paste without formatting</summary>
+      <description>Pick text items as plain text, without formatting like bold or links. Alt+Shift+Enter does the opposite.</description>
+    </key>
     <key name="history-size" type="u">
       <range min="1" max="10000"/>
       <default>200</default>

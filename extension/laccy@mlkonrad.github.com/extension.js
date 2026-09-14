@@ -39,6 +39,7 @@ const SHELL_INTERFACE_XML = `
       <arg name="data" type="ay" direction="in"/>
       <arg name="paste" type="b" direction="in"/>
     </method>
+    <method name="Paste"/>
   </interface>
 </node>`;
 
@@ -48,9 +49,20 @@ const SECRET_MIME_TYPE = 'x-kde-passwordManagerHint';
 const URI_LIST_MIME_TYPE = 'text/uri-list';
 // The types St.Clipboard.get_text() reads.
 const TEXT_MIME_TYPES = ['text/plain;charset=utf-8', 'UTF8_STRING', 'text/plain', 'STRING'];
+// Formatted versions of copied text kept next to the plain text (FORMAT_MIME_TYPES in laccy-core).
+const FORMAT_MIME_TYPES = ['text/html', 'text/rtf', 'application/rtf'];
+// Offered by the laccy popup next to a formatted item it put back (PICKED_MIME_TYPE in laccy-core).
+const PICKED_MIME_TYPE = 'application/x-laccy-picked';
 
 // Gives focus time to return to the previous window after the popup closes.
 const PASTE_DELAY_MS = 100;
+// Keys still held from picking (Alt+Enter, Alt+Shift+Enter) would reach the app
+// together with Ctrl+V, turning it into another shortcut, so pasting waits for
+// them to be released: checking this often, for up to this long.
+const HELD_KEYS_POLL_MS = 20;
+const HELD_KEYS_WAIT_MS = 5000;
+const HELD_KEYS_MASK = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK |
+    Clutter.ModifierType.SUPER_MASK | Clutter.ModifierType.HYPER_MASK | Clutter.ModifierType.META_MASK;
 
 // Any program on the session bus can call SetClipboard. To keep that from
 // becoming a way to type into other apps, pasting is only allowed once, and
@@ -58,6 +70,7 @@ const PASTE_DELAY_MS = 100;
 const PASTE_ALLOWED_US = 2 * 60 * GLib.USEC_PER_SEC;
 
 const SHOW_INDICATOR_KEY = 'show-indicator';
+const MAX_ITEM_BYTES_KEY = 'max-item-bytes';
 const MAX_IMAGE_BYTES_KEY = 'max-image-bytes';
 const INDICATOR_ICON = 'edit-paste-symbolic';
 
@@ -161,6 +174,10 @@ export default class LaccyExtension extends Extension {
         const mimeTypes = source.get_mimetypes();
         if (mimeTypes.includes(SECRET_MIME_TYPE))
             return;
+        // A formatted item picked in the popup, which offers it itself and has
+        // already moved it to the top.
+        if (mimeTypes.includes(PICKED_MIME_TYPE))
+            return;
 
         // Windows without a desktop file get made-up IDs like "window:3"; don't record those.
         const focusAppId = Shell.WindowTracker.get_default().focus_app?.get_id() ?? '';
@@ -175,7 +192,7 @@ export default class LaccyExtension extends Extension {
         else if (imageType && !mimeTypes.some(mimeType => TEXT_MIME_TYPES.includes(mimeType)))
             this._recordImage(imageType, sourceApp);
         else
-            this._recordText(sourceApp);
+            this._recordText(sourceApp, mimeTypes);
     }
 
     // GNOME offers its copy before the current main loop dispatch ends, if it
@@ -195,10 +212,46 @@ export default class LaccyExtension extends Extension {
         }
     }
 
-    _recordText(sourceApp) {
+    // Records the copied text, with its formatted versions if `mimeTypes` offers any.
+    _recordText(sourceApp, mimeTypes = []) {
+        const formatTypes = FORMAT_MIME_TYPES.filter(mimeType => mimeTypes.includes(mimeType));
         this._clipboard.get_text(St.ClipboardType.CLIPBOARD, (_clipboard, text) => {
-            if (this._selection && text)
+            if (!this._selection || !text)
+                return;
+            if (formatTypes.length === 0) {
                 this._callDaemon('AddText', new GLib.Variant('(ss)', [text, sourceApp]));
+                return;
+            }
+            // The daemon would drop larger ones anyway; don't send them over D-Bus.
+            const maxBytes = this._settings.get_uint(MAX_ITEM_BYTES_KEY);
+            Promise.all(formatTypes.map(mimeType => this._readContent(mimeType, maxBytes))).then(contents => {
+                if (!this._selection)
+                    return;
+                const formats = formatTypes
+                    .map((mimeType, i) => [mimeType, contents[i]])
+                    .filter(([, data]) => data)
+                    .map(([mimeType, data]) => GLib.Variant.new_dict_entry(new GLib.Variant('s', mimeType), data));
+                this._callDaemon('AddFormattedText', GLib.Variant.new_tuple([
+                    new GLib.Variant('s', text),
+                    GLib.Variant.new_array(new GLib.VariantType('{say}'), formats),
+                    new GLib.Variant('s', sourceApp),
+                ]));
+            });
+        });
+    }
+
+    // The clipboard's content in `mimeType` as an `ay` variant, or null if there
+    // is none or it's larger than `maxBytes`.
+    _readContent(mimeType, maxBytes) {
+        return new Promise(resolve => {
+            this._clipboard.get_content(St.ClipboardType.CLIPBOARD, mimeType, (_clipboard, bytes) => {
+                // St frees the bytes when this callback returns (using them later
+                // crashes gnome-shell), so the variant has to take its reference here.
+                const size = bytes?.get_size() ?? 0;
+                resolve(size > 0 && size <= maxBytes
+                    ? GLib.Variant.new_from_bytes(new GLib.VariantType('ay'), bytes, true)
+                    : null);
+            });
         });
     }
 
@@ -310,6 +363,12 @@ export default class LaccyExtension extends Extension {
         this._pasteIfAllowed(paste);
     }
 
+    // D-Bus method, called by the popup after it put a formatted item on the
+    // clipboard itself.
+    Paste() {
+        this._pasteIfAllowed(true);
+    }
+
     // Setting the clipboard emits owner-changed right away, which this flag
     // tells apart from copies made in other apps.
     _setClipboard(set) {
@@ -333,9 +392,21 @@ export default class LaccyExtension extends Extension {
 
         if (this._pasteTimeoutId)
             GLib.Source.remove(this._pasteTimeoutId);
-        this._pasteTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PASTE_DELAY_MS, () => {
+        const start = GLib.get_monotonic_time();
+        this._pasteTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HELD_KEYS_POLL_MS, () => {
+            const elapsedMs = (GLib.get_monotonic_time() - start) / 1000;
+            if (elapsedMs < PASTE_DELAY_MS)
+                return GLib.SOURCE_CONTINUE;
+            const [, , mods] = global.get_pointer();
+            const held = (mods & HELD_KEYS_MASK) !== 0;
+            if (held && elapsedMs < HELD_KEYS_WAIT_MS)
+                return GLib.SOURCE_CONTINUE;
+
             this._pasteTimeoutId = 0;
-            this._sendPasteKeys();
+            if (held)
+                console.warn('Laccy: not pasting, because modifier keys are still held');
+            else
+                this._sendPasteKeys();
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -345,6 +416,5 @@ export default class LaccyExtension extends Extension {
         this._keyboard.notify_keyval(time, Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
         this._keyboard.notify_keyval(time, Clutter.KEY_v, Clutter.KeyState.PRESSED);
         this._keyboard.notify_keyval(time, Clutter.KEY_v, Clutter.KeyState.RELEASED);
-        this._keyboard.notify_keyval(time, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
-    }
+        this._keyboard.notify_keyval(time, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);    }
 }

@@ -1,6 +1,8 @@
 //! laccy is the clipboard history popup and its preferences window. The GNOME
 //! Shell extension's shortcut launches it, and it exits once its windows
-//! close, so it uses no memory while hidden.
+//! close, so it uses no memory while hidden. The exception: after a text item
+//! is picked with its formatting, it keeps offering it until something else is
+//! copied (see `popup::offer_formatted`).
 
 mod popup;
 mod preferences;

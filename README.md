@@ -37,7 +37,8 @@ or type keys. Laccy is therefore three small parts:
 
 **Keeping it lightweight:** no GTK process runs while the popup is hidden.
 `laccy` starts on the shortcut and exits when it closes, `laccyd` is the only
-thing that stays running, and the popup loads only a 10,000-character excerpt
+thing that stays running (except after you pick [formatted text](#images-files-and-formatted-text)),
+and the popup loads only a 10,000-character excerpt
 of each item. Images show as small thumbnails, made once when they're copied
 by a `laccy --thumbnail` process that exits right away (image decoders hold on
 to memory, so they never load in `laccyd`). The popup only decodes the
@@ -62,11 +63,13 @@ apps (see [Preferences](#preferences)). Nothing is recorded while the
 screen is locked, because GNOME disables extensions then. History never
 leaves your machine.
 
-## Images and files
+## Images, files and formatted text
 
 - **Files** copied in Files (or any app that copies a list of `file://` URIs) are recorded as files. Picking them copies the files again, so you can paste them into a folder or an upload dialog. Search matches their paths.
 - **Images** (screenshots, *Copy Image* in a browser) are recorded when the app offers an image and no text. Apps that offer text next to an image, like spreadsheets, are recorded as text. Images have no text to search, so they only show while the search is empty.
 - Images larger than 10 MB aren't recorded. Change the limit, in bytes, with the `max-image-bytes` setting (see [Preferences](#preferences)).
+- **Formatted text** (bold, links, lists or tables copied from documents, web pages and mail) keeps its HTML and RTF next to the plain text, each up to the `max-item-bytes` limit (1 MB). Picking it pastes the formatting too; **Alt+Shift+Enter** or the **Paste Without Formatting** preference picks the plain text. Apps' own formats, like LibreOffice's, aren't kept, so copies between LibreOffice documents can lose some styling.
+- GNOME Shell extensions can only put one format on the clipboard, and GNOME keeps only the plain text when an app that copied something quits. So after you pick formatted text, `laccy` keeps offering it, without a window, until something else is copied, then exits. Meanwhile it uses about 11 MB of private memory (53 MB resident, mostly shared libraries).
 
 ## Build and install
 
@@ -98,6 +101,7 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | ↑ / ↓ | Move the selection |
 | Enter / click | Copy the item (and paste it, if Paste Automatically is on) |
 | Alt+Enter | The opposite of Enter: copy and paste, or copy only |
+| Alt+Shift+Enter | Paste the item with the opposite of Paste Without Formatting: as plain text, unless that's on |
 | Ctrl+1 … Ctrl+9 | Pick the first nine items |
 | Alt+P | Pin or unpin (pinned items stay at the top) |
 | Alt+Delete | Delete the item |
@@ -113,6 +117,7 @@ in the top bar, by right-clicking Laccy in the app grid and choosing
 
 - **Open Laccy:** the shortcut. Click it and press the new key combination.
 - **Paste Automatically:** also paste after picking an item (off by default).
+- **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).
 - **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Show Icon in Top Bar:** click the icon to open the history, right-click it for a menu (on by default).
 - **History Size:** unpinned items to keep (200 by default).
@@ -130,6 +135,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 
 - **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or Paste Automatically) doesn't work there yet.
 - **Images are kept at full size** in the history database, so a long history of screenshots takes disk space.
+- **Picked formatted text** loses its formatting if `laccy` is killed before something else is copied; GNOME then keeps only the plain text.
 - The popup opens where GNOME places new windows (Wayland apps can't choose their own position).
 
 ## Roadmap
@@ -139,7 +145,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Images and file copies
 - [x] Fuzzy search mode
 - [x] Regex search mode
-- [ ] Paste without formatting
+- [x] Formatted text (HTML/RTF) and paste without formatting
 - [x] Live refresh while the popup is open
 - [ ] App icon, Flatpak/RPM packaging, extensions.gnome.org release
 

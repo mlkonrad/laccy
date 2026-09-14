@@ -35,6 +35,13 @@ pub const DAEMON_INTERFACE: &str = "io.github.mlkonrad.Laccy.Daemon1";
 /// Emitted by `laccyd` after it stores a copy, so an open popup can reload.
 pub const HISTORY_CHANGED_SIGNAL: &str = "HistoryChanged";
 
+/// Formatted versions of copied text kept next to the plain text. The
+/// extension has its own copy of this list.
+pub const FORMAT_MIME_TYPES: [&str; 3] = ["text/html", "text/rtf", "application/rtf"];
+/// Offered by `laccy` next to a formatted item it puts back on the clipboard,
+/// so the extension doesn't record that copy again.
+pub const PICKED_MIME_TYPE: &str = "application/x-laccy-picked";
+
 /// Exported by the GNOME Shell extension from inside the gnome-shell process.
 pub const SHELL_BUS_NAME: &str = "org.gnome.Shell";
 pub const SHELL_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Shell";

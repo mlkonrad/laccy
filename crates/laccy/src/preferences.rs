@@ -4,8 +4,8 @@
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
-    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, PASTE_AUTOMATICALLY_KEY, SEARCH_MODE_KEY, SHOW_INDICATOR_KEY,
-    TOGGLE_SHORTCUT_KEY,
+    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, SEARCH_MODE_KEY,
+    SHOW_INDICATOR_KEY, TOGGLE_SHORTCUT_KEY,
 };
 use laccy_core::search;
 
@@ -99,6 +99,13 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         .build();
     settings.bind(PASTE_AUTOMATICALLY_KEY, &paste_row, "active").build();
     group.add(&paste_row);
+
+    let formatting_row = adw::SwitchRow::builder()
+        .title("Paste Without Formatting")
+        .subtitle("Pick text without formatting like bold or links. Alt+Shift+Enter does the opposite")
+        .build();
+    settings.bind(PASTE_WITHOUT_FORMATTING_KEY, &formatting_row, "active").build();
+    group.add(&formatting_row);
 
     let mode_labels: Vec<&str> = search::Mode::ALL
         .iter()

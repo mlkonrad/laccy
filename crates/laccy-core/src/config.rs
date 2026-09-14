@@ -6,14 +6,15 @@ use std::path::PathBuf;
 
 use gio::prelude::*;
 
-use crate::history::Content;
-use crate::{files, search};
+use crate::history::{Content, Format};
+use crate::{FORMAT_MIME_TYPES, files, search};
 
 pub const SCHEMA_ID: &str = "org.gnome.shell.extensions.laccy";
 pub const EXTENSION_UUID: &str = "laccy@mlkonrad.github.com";
 
 pub const TOGGLE_SHORTCUT_KEY: &str = "laccy-toggle-shortcut";
 pub const PASTE_AUTOMATICALLY_KEY: &str = "paste-automatically";
+pub const PASTE_WITHOUT_FORMATTING_KEY: &str = "paste-without-formatting";
 pub const HISTORY_SIZE_KEY: &str = "history-size";
 pub const IGNORED_APPS_KEY: &str = "ignored-apps";
 pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
@@ -30,6 +31,9 @@ pub struct Config {
     /// Also paste into the focused app after picking an item, instead of only
     /// copying it. Alt+Enter does the opposite.
     pub paste_automatically: bool,
+    /// Pick text items as plain text, without their formatting.
+    /// Alt+Shift+Enter does the opposite.
+    pub paste_without_formatting: bool,
     /// Desktop app IDs whose copies are never recorded, e.g. `org.keepassxc.KeePassXC.desktop`.
     pub ignored_apps: Vec<String>,
     /// Text and file copies larger than this are not recorded.
@@ -47,6 +51,7 @@ impl Default for Config {
         Self {
             history_size: 200,
             paste_automatically: false,
+            paste_without_formatting: false,
             ignored_apps: Vec::new(),
             max_item_bytes: 1024 * 1024,
             max_image_bytes: 10 * 1024 * 1024,
@@ -65,6 +70,7 @@ impl Config {
         Self {
             history_size: settings.uint(HISTORY_SIZE_KEY) as usize,
             paste_automatically: settings.boolean(PASTE_AUTOMATICALLY_KEY),
+            paste_without_formatting: settings.boolean(PASTE_WITHOUT_FORMATTING_KEY),
             ignored_apps: settings.strv(IGNORED_APPS_KEY).iter().map(ToString::to_string).collect(),
             max_item_bytes: settings.uint(MAX_ITEM_BYTES_KEY) as usize,
             max_image_bytes: settings.uint(MAX_IMAGE_BYTES_KEY) as usize,
@@ -92,6 +98,19 @@ impl Config {
                 mime_type.starts_with("image/") && !data.is_empty() && data.len() <= self.max_image_bytes
             }
         }
+    }
+
+    /// The formatted versions of a text copy worth keeping: known formats no
+    /// larger than a text copy may be.
+    pub fn formats_to_record(&self, formats: Vec<Format>) -> Vec<Format> {
+        formats
+            .into_iter()
+            .filter(|format| {
+                FORMAT_MIME_TYPES.contains(&format.mime_type.as_str())
+                    && !format.data.is_empty()
+                    && format.data.len() <= self.max_item_bytes
+            })
+            .collect()
     }
 }
 
@@ -168,12 +187,14 @@ mod tests {
         let settings = test_settings();
         settings.set_uint(HISTORY_SIZE_KEY, 50).unwrap();
         settings.set_boolean(PASTE_AUTOMATICALLY_KEY, true).unwrap();
+        settings.set_boolean(PASTE_WITHOUT_FORMATTING_KEY, true).unwrap();
         settings.set_strv(IGNORED_APPS_KEY, ["org.keepassxc.KeePassXC.desktop"]).unwrap();
         settings.set_string(SEARCH_MODE_KEY, "fuzzy").unwrap();
 
         let config = Config::from_settings(&settings);
         assert_eq!(config.history_size, 50);
         assert!(config.paste_automatically);
+        assert!(config.paste_without_formatting);
         assert_eq!(config.search_mode, search::Mode::Fuzzy);
         assert!(config.is_ignored("org.keepassxc.KeePassXC.desktop"));
         assert!(!config.is_ignored(""));
@@ -205,6 +226,19 @@ mod tests {
         assert!(!config.should_record(&image("image/png", b""), ""));
         assert!(!config.should_record(&image("image/png", b"12345"), ""));
         assert!(!config.should_record(&image("text/html", b"1234"), ""));
+    }
+
+    #[test]
+    fn records_only_known_small_formats() {
+        let config = Config { max_item_bytes: 4, ..Config::default() };
+        let format = |mime_type: &str, data: &[u8]| Format { mime_type: mime_type.to_owned(), data: data.to_vec() };
+        let formats = vec![
+            format("text/html", b"<b>"),
+            format("text/rtf", b"{\\rtf1 too long}"),
+            format("application/x-private", b"x"),
+            format("application/rtf", b""),
+        ];
+        assert_eq!(config.formats_to_record(formats), [format("text/html", b"<b>")]);
     }
 
     #[test]

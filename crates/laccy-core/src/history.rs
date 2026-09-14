@@ -50,6 +50,13 @@ pub struct Item {
     pub pinned: bool,
 }
 
+/// A formatted version of a text item, like its HTML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Format {
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS items (
     id           INTEGER PRIMARY KEY,
@@ -73,6 +80,18 @@ ALTER TABLE items ADD COLUMN mime_type TEXT;
 ALTER TABLE items ADD COLUMN data BLOB;
 ALTER TABLE items ADD COLUMN thumbnail BLOB;
 PRAGMA user_version = 2;
+";
+
+/// Formatted versions of text items. They go when their item does, or a new
+/// item reusing its id would get them.
+const MIGRATION_V3: &str = "
+CREATE TABLE formats (
+    item_id   INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+    mime_type TEXT    NOT NULL,
+    data      BLOB    NOT NULL,
+    PRIMARY KEY (item_id, mime_type)
+);
+PRAGMA user_version = 3;
 ";
 
 pub struct History {
@@ -100,6 +119,8 @@ impl History {
     fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(Duration::from_secs(2))?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
+        // Per connection, and not inside a transaction. Deletes formats with their item.
+        conn.pragma_update(None, "foreign_keys", true)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         // Read inside the transaction, so the daemon and the popup can't both migrate.
         let version: i32 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -108,6 +129,9 @@ impl History {
         }
         if version < 2 {
             tx.execute_batch(MIGRATION_V2)?;
+        }
+        if version < 3 {
+            tx.execute_batch(MIGRATION_V3)?;
         }
         tx.commit()?;
         Ok(Self { conn })
@@ -217,6 +241,29 @@ impl History {
             .optional()
     }
 
+    /// The formatted versions of a text item, if its copy had any.
+    pub fn formats(&self, id: i64) -> Result<Vec<Format>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT mime_type, data FROM formats WHERE item_id = ?1 ORDER BY mime_type")?;
+        stmt.query_map(params![id], |row| Ok(Format { mime_type: row.get(0)?, data: row.get(1)? }))?
+            .collect()
+    }
+
+    /// Replaces the formatted versions of a text item. Don't call it for a copy
+    /// without formatting, so copying just the text keeps what the item had.
+    pub fn set_formats(&mut self, id: i64, formats: &[Format]) -> Result<()> {
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM formats WHERE item_id = ?1", params![id])?;
+        for format in formats {
+            tx.execute(
+                "INSERT OR REPLACE INTO formats (item_id, mime_type, data) VALUES (?1, ?2, ?3)",
+                params![id, format.mime_type, format.data],
+            )?;
+        }
+        tx.commit()
+    }
+
     /// The PNG thumbnail of an image item, if it has one.
     pub fn thumbnail(&self, id: i64) -> Result<Option<Vec<u8>>> {
         self.conn
@@ -296,8 +343,42 @@ mod tests {
         Content::Image { mime_type: "image/png".to_owned(), data: data.to_vec() }
     }
 
+    fn html(data: &str) -> Format {
+        Format { mime_type: "text/html".to_owned(), data: data.as_bytes().to_vec() }
+    }
+
     fn texts(history: &History) -> Vec<String> {
         history.items().unwrap().into_iter().map(|item| item.excerpt).collect()
+    }
+
+    #[test]
+    fn only_formatted_copies_replace_formats() {
+        let mut history = History::open_in_memory().unwrap();
+        let id = history.add(&text("hello"), None, 10).unwrap();
+        history.set_formats(id, &[html("<b>hello</b>")]).unwrap();
+        // The daemon doesn't set formats for a plain copy of the same text.
+        assert_eq!(history.add(&text("hello"), None, 10).unwrap(), id);
+        assert_eq!(history.formats(id).unwrap(), [html("<b>hello</b>")]);
+
+        history.set_formats(id, &[html("<i>hello</i>")]).unwrap();
+        assert_eq!(history.formats(id).unwrap(), [html("<i>hello</i>")]);
+    }
+
+    #[test]
+    fn formats_go_with_their_item() {
+        let mut history = History::open_in_memory().unwrap();
+        let a = history.add(&text("a"), None, 1).unwrap();
+        history.set_formats(a, &[html("a")]).unwrap();
+        // Trims "a".
+        let b = history.add(&text("b"), None, 1).unwrap();
+        history.set_formats(b, &[html("b")]).unwrap();
+        history.delete(b).unwrap();
+
+        let count: i64 = history.conn.query_row("SELECT COUNT(*) FROM formats", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+        // Ids get reused once the table is empty; the new item must not inherit formats.
+        let c = history.add(&text("c"), None, 1).unwrap();
+        assert!(history.formats(c).unwrap().is_empty());
     }
 
     #[test]
@@ -433,6 +514,8 @@ mod tests {
         assert_eq!((items[0].kind, items[0].excerpt.as_str()), (Kind::Text, "old"));
         // The old row's hash still finds it.
         assert_eq!(history.add(&text("old"), None, 10).unwrap(), items[0].id);
+        history.set_formats(items[0].id, &[html("<b>old</b>")]).unwrap();
+        assert_eq!(history.formats(items[0].id).unwrap(), [html("<b>old</b>")]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

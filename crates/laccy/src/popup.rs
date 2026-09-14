@@ -4,10 +4,10 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use laccy_core::config::Config;
-use laccy_core::history::{Content, History, Item, Kind};
+use laccy_core::history::{Content, Format, History, Item, Kind};
 use laccy_core::{
-    DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, SHELL_BUS_NAME, SHELL_INTERFACE,
-    SHELL_OBJECT_PATH, THUMBNAIL_SCALE, files, search,
+    DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, PICKED_MIME_TYPE, SHELL_BUS_NAME,
+    SHELL_INTERFACE, SHELL_OBJECT_PATH, THUMBNAIL_SCALE, files, search,
 };
 
 const PREVIEW_CHARS: usize = 100;
@@ -162,7 +162,7 @@ impl Popup {
         self.list.connect_activate(glib::clone!(
             #[weak(rename_to = popup)]
             self,
-            move |_, position| popup.pick(position, popup.config.paste_automatically)
+            move |_, position| popup.pick(position, popup.config.paste_automatically, popup.config.paste_without_formatting)
         ));
 
         // Like Maccy, clicking anywhere else dismisses the popup.
@@ -217,13 +217,20 @@ impl Popup {
         }
         let mods = state & gtk::accelerator_get_default_mod_mask();
         let paste = self.config.paste_automatically;
+        let plain = self.config.paste_without_formatting;
         match key {
             gdk::Key::Escape => self.close(),
             gdk::Key::Down if mods.is_empty() => self.move_selection(1),
             gdk::Key::Up if mods.is_empty() => self.move_selection(-1),
-            gdk::Key::Return | gdk::Key::KP_Enter if mods.is_empty() => self.pick(self.selection.selected(), paste),
+            gdk::Key::Return | gdk::Key::KP_Enter if mods.is_empty() => {
+                self.pick(self.selection.selected(), paste, plain)
+            }
             gdk::Key::Return | gdk::Key::KP_Enter if mods == Mod::ALT_MASK => {
-                self.pick(self.selection.selected(), !paste)
+                self.pick(self.selection.selected(), !paste, plain)
+            }
+            // Like Maccy's Option+Shift+Enter: always pastes, with the other formatting choice.
+            gdk::Key::Return | gdk::Key::KP_Enter if mods == Mod::ALT_MASK | Mod::SHIFT_MASK => {
+                self.pick(self.selection.selected(), true, !plain)
             }
             gdk::Key::p | gdk::Key::P if mods == Mod::ALT_MASK => self.toggle_pin(),
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::ALT_MASK => self.delete_selected(),
@@ -232,7 +239,7 @@ impl Popup {
             }
             gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
             _ if mods == Mod::CONTROL_MASK => match key.to_unicode().and_then(|c| c.to_digit(10)) {
-                Some(digit @ 1..=NUMBERED_ITEMS) => self.pick(digit - 1, paste),
+                Some(digit @ 1..=NUMBERED_ITEMS) => self.pick(digit - 1, paste, plain),
                 _ => return glib::Propagation::Proceed,
             },
             _ => return glib::Propagation::Proceed,
@@ -319,8 +326,10 @@ impl Popup {
     }
 
     /// Copies the item at `position` and closes the popup. The extension sets
-    /// the clipboard so it outlives this process, then pastes if asked.
-    fn pick(&self, position: u32, paste: bool) {
+    /// the clipboard so it outlives this process, then pastes if asked. Text
+    /// with formatting, unless `plain`, is offered by this process instead
+    /// (see [`offer_formatted`]).
+    fn pick(&self, position: u32, paste: bool, plain: bool) {
         let Some(id) = self.item_at(position, |item| item.id) else {
             return;
         };
@@ -340,15 +349,31 @@ impl Popup {
             return;
         };
 
-        let (method, parameters) = match content {
-            Content::Text(text) => ("SetClipboard", (text, paste).to_variant()),
-            Content::Files(uris) => {
-                ("SetContent", set_content_parameters(files::MIME_TYPE, files::uri_list(&uris).as_bytes(), paste))
-            }
-            Content::Image { mime_type, data } => ("SetContent", set_content_parameters(&mime_type, &data, paste)),
+        let formats = match &content {
+            Content::Text(_) if !plain => self.history.formats(id).unwrap_or_else(|err| {
+                eprintln!("laccy: cannot read formats: {err}");
+                Vec::new()
+            }),
+            _ => Vec::new(),
         };
-        // The extension doesn't record clipboard changes it makes itself, so
-        // move the item to the top here.
+
+        let call = match content {
+            Content::Text(text) if !formats.is_empty() => {
+                // While the window still has focus, which Wayland requires to set the clipboard.
+                offer_formatted(&app, &WidgetExt::display(&self.window), &text, formats);
+                paste.then_some(("Paste", None))
+            }
+            Content::Text(text) => Some(("SetClipboard", Some((text, paste).to_variant()))),
+            Content::Files(uris) => Some((
+                "SetContent",
+                Some(set_content_parameters(files::MIME_TYPE, files::uri_list(&uris).as_bytes(), paste)),
+            )),
+            Content::Image { mime_type, data } => {
+                Some(("SetContent", Some(set_content_parameters(&mime_type, &data, paste))))
+            }
+        };
+        // The extension doesn't record clipboard changes it or this process
+        // makes, so move the item to the top here.
         if let Err(err) = self.history.touch(id) {
             eprintln!("laccy: cannot update item: {err}");
         }
@@ -357,19 +382,22 @@ impl Popup {
         let hold = app.hold();
         // Closing first returns focus to the previous window before the paste.
         self.close();
+        let Some((method, parameters)) = call else {
+            return;
+        };
         connection.call(
             Some(SHELL_BUS_NAME),
             SHELL_OBJECT_PATH,
             SHELL_INTERFACE,
             method,
-            Some(&parameters),
+            parameters.as_ref(),
             None,
             gio::DBusCallFlags::NONE,
             5000,
             gio::Cancellable::NONE,
             move |result| {
                 if let Err(err) = result {
-                    eprintln!("laccy: the GNOME Shell extension could not set the clipboard: {err}");
+                    eprintln!("laccy: the GNOME Shell extension's {method} call failed: {err}");
                 }
                 drop(hold);
             },
@@ -475,6 +503,33 @@ fn haystack(item: &Item, mode: search::Mode) -> String {
         }
         Kind::Image => String::new(),
     }
+}
+
+/// Puts a text item on the clipboard with its formatted versions. The
+/// extension can only offer one format, and GNOME keeps only the plain text
+/// when a clipboard owner quits, so this process offers them and keeps running,
+/// without a window, until something else is copied.
+fn offer_formatted(app: &gtk::Application, display: &gdk::Display, text: &str, formats: Vec<Format>) {
+    // A string value is offered in every plain text type apps ask for.
+    let mut providers = vec![gdk::ContentProvider::for_value(&text.to_value())];
+    providers.extend(
+        formats
+            .into_iter()
+            .map(|format| gdk::ContentProvider::for_bytes(&format.mime_type, &glib::Bytes::from_owned(format.data))),
+    );
+    providers.push(gdk::ContentProvider::for_bytes(PICKED_MIME_TYPE, &glib::Bytes::from_static(b"")));
+
+    let clipboard = display.clipboard();
+    if let Err(err) = clipboard.set_content(Some(&gdk::ContentProvider::new_union(&providers))) {
+        eprintln!("laccy: cannot set the clipboard: {err}");
+        return;
+    }
+    let hold = RefCell::new(Some(app.hold()));
+    clipboard.connect_local_notify(move |clipboard| {
+        if !clipboard.is_local() {
+            drop(hold.take());
+        }
+    });
 }
 
 /// Arguments of the extension's `SetContent` method.
