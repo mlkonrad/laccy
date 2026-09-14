@@ -105,11 +105,15 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         .map(|mode| match mode {
             search::Mode::Exact => "Exact",
             search::Mode::Fuzzy => "Fuzzy",
+            search::Mode::Regex => "Regular Expression",
         })
         .collect();
     let search_row = adw::ComboRow::builder()
         .title("Search Mode")
-        .subtitle("Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”")
+        .subtitle(
+            "Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”. \
+             Regular Expression matches a pattern, like “^https?://”",
+        )
         .model(&gtk::StringList::new(&mode_labels))
         .build();
     settings

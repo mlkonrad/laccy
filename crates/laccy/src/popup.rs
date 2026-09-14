@@ -42,6 +42,9 @@ pub struct Popup {
     objects: RefCell<Vec<glib::BoxedAnyObject>>,
     /// Normalized search text for each entry in `objects`.
     haystacks: RefCell<Vec<String>>,
+    /// The last query that was a valid pattern, whose results stay listed
+    /// while a regular expression is being typed.
+    valid_query: RefCell<String>,
     /// Reloads when laccyd stores a copy; unsubscribes when the popup is gone.
     history_changed: RefCell<Option<gio::SignalSubscription>>,
     was_active: Cell<bool>,
@@ -89,7 +92,10 @@ impl Popup {
         stack.add_named(&empty, Some("empty"));
 
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("Search clipboard history")
+            .placeholder_text(match config.search_mode {
+                search::Mode::Regex => "Search clipboard history with a regular expression",
+                search::Mode::Exact | search::Mode::Fuzzy => "Search clipboard history",
+            })
             .search_delay(0)
             .margin_top(8)
             .margin_bottom(4)
@@ -128,6 +134,7 @@ impl Popup {
             config,
             objects: RefCell::default(),
             haystacks: RefCell::default(),
+            valid_query: RefCell::default(),
             history_changed: RefCell::default(),
             was_active: Cell::new(false),
             closing: Cell::new(false),
@@ -241,7 +248,7 @@ impl Popup {
             eprintln!("laccy: cannot read history: {err}");
             Vec::new()
         });
-        *self.haystacks.borrow_mut() = items.iter().map(haystack).collect();
+        *self.haystacks.borrow_mut() = items.iter().map(|item| haystack(item, self.config.search_mode)).collect();
         *self.objects.borrow_mut() = items.into_iter().map(glib::BoxedAnyObject::new).collect();
         self.apply_filter();
         let position = selected
@@ -253,7 +260,24 @@ impl Popup {
 
     fn apply_filter(&self) {
         let objects = self.objects.borrow();
-        let matches: Vec<glib::BoxedAnyObject> = search::rank(&self.haystacks.borrow(), &self.search.text(), self.config.search_mode)
+        let haystacks = self.haystacks.borrow();
+        let query = self.search.text();
+        let mode = self.config.search_mode;
+        let ranked = match search::rank(&haystacks, &query, mode) {
+            Ok(ranked) => {
+                self.valid_query.replace(query.to_string());
+                self.search.remove_css_class("error");
+                self.search.set_tooltip_text(None);
+                ranked
+            }
+            // An unfinished pattern, like "(a", keeps the last valid results.
+            Err(err) => {
+                self.search.add_css_class("error");
+                self.search.set_tooltip_text(Some(err.message()));
+                search::rank(&haystacks, &self.valid_query.borrow(), mode).unwrap_or_default()
+            }
+        };
+        let matches: Vec<glib::BoxedAnyObject> = ranked
             .into_iter()
             .map(|index| objects[index].clone())
             .collect();
@@ -443,10 +467,12 @@ impl Popup {
 
 /// What the search looks through: the text itself, or the paths of copied
 /// files. Images have nothing to search, so they only show without a query.
-fn haystack(item: &Item) -> String {
+fn haystack(item: &Item, mode: search::Mode) -> String {
     match item.kind {
-        Kind::Text => search::normalize(&item.excerpt),
-        Kind::Files => search::normalize(&item.excerpt.lines().map(files::display_path).collect::<Vec<_>>().join("\n")),
+        Kind::Text => search::normalize(&item.excerpt, mode),
+        Kind::Files => {
+            search::normalize(&item.excerpt.lines().map(files::display_path).collect::<Vec<_>>().join("\n"), mode)
+        }
         Kind::Image => String::new(),
     }
 }

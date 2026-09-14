@@ -28,10 +28,11 @@
       <choices>
         <choice value="exact"/>
         <choice value="fuzzy"/>
+        <choice value="regex"/>
       </choices>
       <default>'exact'</default>
       <summary>Search mode</summary>
-      <description>How the popup matches what you type. "exact" matches each word as written; "fuzzy" also matches its letters in order with gaps, so "gco" finds "git checkout".</description>
+      <description>How the popup matches what you type. "exact" matches each word as written; "fuzzy" also matches its letters in order with gaps, so "gco" finds "git checkout"; "regex" matches a regular expression, ignoring case.</description>
     </key>
     <key name="show-indicator" type="b">
       <default>true</default>

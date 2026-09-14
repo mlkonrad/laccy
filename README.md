@@ -113,7 +113,7 @@ in the top bar, by right-clicking Laccy in the app grid and choosing
 
 - **Open Laccy:** the shortcut. Click it and press the new key combination.
 - **Paste Automatically:** also paste after picking an item (off by default).
-- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout` (Exact by default).
+- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Show Icon in Top Bar:** click the icon to open the history, right-click it for a menu (on by default).
 - **History Size:** unpinned items to keep (200 by default).
 - **Ignored Apps:** apps whose copies are never recorded.
@@ -138,7 +138,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [ ] Terminal-aware paste (Ctrl+Shift+V when a terminal is focused)
 - [x] Images and file copies
 - [x] Fuzzy search mode
-- [ ] Regex search mode
+- [x] Regex search mode
 - [ ] Paste without formatting
 - [x] Live refresh while the popup is open
 - [ ] App icon, Flatpak/RPM packaging, extensions.gnome.org release
