@@ -11,7 +11,7 @@ use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH};
 
 const INTROSPECTION: &str = r#"
 <node>
-  <interface name="io.github.laccy.Daemon1">
+  <interface name="io.github.mlkonrad.Laccy.Daemon1">
     <method name="AddText">
       <arg name="text" type="s" direction="in"/>
       <arg name="source_app" type="s" direction="in"/>

@@ -8,17 +8,17 @@ pub mod search;
 use std::path::PathBuf;
 
 /// Application ID of the popup; also the name of its desktop file.
-pub const APP_ID: &str = "io.github.laccy.Laccy";
+pub const APP_ID: &str = "io.github.mlkonrad.Laccy";
 
 /// Exported by `laccyd`, which the extension calls for every clipboard change.
-pub const DAEMON_BUS_NAME: &str = "io.github.laccy.Laccy.Daemon";
-pub const DAEMON_OBJECT_PATH: &str = "/io/github/laccy/Laccy/Daemon";
-pub const DAEMON_INTERFACE: &str = "io.github.laccy.Daemon1";
+pub const DAEMON_BUS_NAME: &str = "io.github.mlkonrad.Laccy.Daemon";
+pub const DAEMON_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Daemon";
+pub const DAEMON_INTERFACE: &str = "io.github.mlkonrad.Laccy.Daemon1";
 
 /// Exported by the GNOME Shell extension from inside the gnome-shell process.
 pub const SHELL_BUS_NAME: &str = "org.gnome.Shell";
-pub const SHELL_OBJECT_PATH: &str = "/io/github/laccy/Shell";
-pub const SHELL_INTERFACE: &str = "io.github.laccy.Shell1";
+pub const SHELL_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Shell";
+pub const SHELL_INTERFACE: &str = "io.github.mlkonrad.Laccy.Shell1";
 
 pub fn history_path() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share").join("laccy/history.db")

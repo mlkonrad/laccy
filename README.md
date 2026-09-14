@@ -29,7 +29,7 @@ or type keys. Laccy is therefore three small parts:
 
 | Part | Where | Role |
 |---|---|---|
-| `extension/laccy@laccy.github.io` | inside gnome-shell | Watches the clipboard, handles the shortcut, sets the clipboard and pastes |
+| `extension/laccy@mlkonrad.github.com` | inside gnome-shell | Watches the clipboard, handles the shortcut, sets the clipboard and pastes |
 | `crates/laccyd` | background, D-Bus activated | Stores copied text; only glib and SQLite, no GTK |
 | `crates/laccy` | runs only while visible | The popup: search, pick, pin, delete |
 | `crates/laccy-core` | library | History database, search, config, D-Bus names |
@@ -65,7 +65,7 @@ scripts/install-dev.sh     # builds, installs into ~/.local, links the extension
 ```
 
 The first time, log out and back in (GNOME Shell only discovers new extensions
-at login), then run `gnome-extensions enable laccy@laccy.github.io`.
+at login), then run `gnome-extensions enable laccy@mlkonrad.github.com`.
 
 `scripts/uninstall-dev.sh` removes everything except your history.
 
@@ -95,7 +95,7 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 To change the shortcut:
 
 ```sh
-gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@laccy.github.io/schemas \
+gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.github.com/schemas \
   set org.gnome.shell.extensions.laccy laccy-toggle-shortcut "['<Super>v']"
 ```
 
@@ -129,7 +129,6 @@ max_item_bytes = 1048576
 - [ ] Paste without formatting
 - [ ] Live refresh while the popup is open
 - [ ] App icon, Flatpak/RPM packaging, extensions.gnome.org release
-- [ ] Choose a final app ID and domain (currently `io.github.laccy.Laccy`)
 
 ## License
 

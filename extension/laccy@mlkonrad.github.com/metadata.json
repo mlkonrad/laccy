@@ -1,5 +1,5 @@
 {
-  "uuid": "laccy@laccy.github.io",
+  "uuid": "laccy@mlkonrad.github.com",
   "name": "Laccy",
   "description": "Clipboard history in the spirit of Maccy. Records copied text and opens the Laccy popup with Shift+Super+C. Requires the laccy app.",
   "shell-version": ["50"],

@@ -14,20 +14,20 @@ import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const APP_DESKTOP_ID = 'io.github.laccy.Laccy.desktop';
+const APP_DESKTOP_ID = 'io.github.mlkonrad.Laccy.desktop';
 
 // Keybinding names are shared by all extensions (Caffeine also has a
 // "toggle-shortcut"), so ours needs a prefix or GNOME refuses to add it.
 const TOGGLE_SHORTCUT_KEY = 'laccy-toggle-shortcut';
 
-const DAEMON_BUS_NAME = 'io.github.laccy.Laccy.Daemon';
-const DAEMON_OBJECT_PATH = '/io/github/laccy/Laccy/Daemon';
-const DAEMON_INTERFACE = 'io.github.laccy.Daemon1';
+const DAEMON_BUS_NAME = 'io.github.mlkonrad.Laccy.Daemon';
+const DAEMON_OBJECT_PATH = '/io/github/mlkonrad/Laccy/Daemon';
+const DAEMON_INTERFACE = 'io.github.mlkonrad.Laccy.Daemon1';
 
-const SHELL_OBJECT_PATH = '/io/github/laccy/Shell';
+const SHELL_OBJECT_PATH = '/io/github/mlkonrad/Laccy/Shell';
 const SHELL_INTERFACE_XML = `
 <node>
-  <interface name="io.github.laccy.Shell1">
+  <interface name="io.github.mlkonrad.Laccy.Shell1">
     <method name="SetClipboard">
       <arg name="text" type="s" direction="in"/>
       <arg name="paste" type="b" direction="in"/>

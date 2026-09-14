@@ -5,17 +5,17 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bin_dir="$HOME/.local/bin"
 data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
-uuid="laccy@laccy.github.io"
+uuid="laccy@mlkonrad.github.com"
 
 cargo build --release --manifest-path "$root/Cargo.toml"
 install -Dm755 "$root/target/release/laccy" "$bin_dir/laccy"
 install -Dm755 "$root/target/release/laccyd" "$bin_dir/laccyd"
 
 mkdir -p "$data_dir/applications" "$data_dir/dbus-1/services" "$data_dir/gnome-shell/extensions"
-sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.laccy.Laccy.desktop.in" \
-    > "$data_dir/applications/io.github.laccy.Laccy.desktop"
-sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.laccy.Laccy.Daemon.service.in" \
-    > "$data_dir/dbus-1/services/io.github.laccy.Laccy.Daemon.service"
+sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.mlkonrad.Laccy.desktop.in" \
+    > "$data_dir/applications/io.github.mlkonrad.Laccy.desktop"
+sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.mlkonrad.Laccy.Daemon.service.in" \
+    > "$data_dir/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service"
 
 # The extension is symlinked, so edits to its JS apply after re-logging in.
 glib-compile-schemas "$root/extension/$uuid/schemas"
