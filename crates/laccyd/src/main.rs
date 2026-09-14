@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gio::glib;
-use laccy_core::config::Config;
+use laccy_core::config::{self, Config};
 use laccy_core::history::History;
 use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH};
 
@@ -29,12 +29,18 @@ fn main() -> glib::ExitCode {
         }
     };
 
+    // Changes made in the preferences window reach this object through the main loop.
+    let settings = config::settings();
+    if settings.is_none() {
+        eprintln!("laccyd: the extension's settings schema was not found; using default settings");
+    }
+
     let main_loop = glib::MainLoop::new(None, false);
     let owner_id = gio::bus_own_name(
         gio::BusType::Session,
         DAEMON_BUS_NAME,
         gio::BusNameOwnerFlags::NONE,
-        move |connection, _| register(&connection, Rc::clone(&history)),
+        move |connection, _| register(&connection, Rc::clone(&history), settings.clone()),
         |_, _| {},
         glib::clone!(
             #[strong]
@@ -50,7 +56,7 @@ fn main() -> glib::ExitCode {
     glib::ExitCode::FAILURE
 }
 
-fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>) {
+fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, settings: Option<gio::Settings>) {
     let node = gio::DBusNodeInfo::for_xml(INTROSPECTION).expect("introspection XML is valid");
     let interface = node.lookup_interface(DAEMON_INTERFACE).expect("interface is in the XML");
 
@@ -62,7 +68,8 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>) {
                     invocation.return_dbus_error("org.freedesktop.DBus.Error.InvalidArgs", "expected (ss)");
                     return;
                 };
-                match add_text(&mut history.borrow_mut(), &text, &source_app) {
+                let config = settings.as_ref().map_or_else(Config::default, Config::from_settings);
+                match add_text(&mut history.borrow_mut(), &config, &text, &source_app) {
                     Ok(()) => invocation.return_value(None),
                     Err(err) => {
                         eprintln!("laccyd: cannot store clipboard item: {err}");
@@ -80,9 +87,12 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>) {
     }
 }
 
-fn add_text(history: &mut History, text: &str, source_app: &str) -> laccy_core::history::Result<()> {
-    // Re-read on every copy so config edits apply without restarting the daemon.
-    let config = Config::load();
+fn add_text(
+    history: &mut History,
+    config: &Config,
+    text: &str,
+    source_app: &str,
+) -> laccy_core::history::Result<()> {
     if text.trim().is_empty() || text.len() > config.max_item_bytes || config.is_ignored(source_app) {
         return Ok(());
     }

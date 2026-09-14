@@ -7,12 +7,14 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 const APP_DESKTOP_ID = 'io.github.mlkonrad.Laccy.desktop';
 
@@ -46,6 +48,38 @@ const PASTE_DELAY_MS = 100;
 // only within this long after the user opened the popup with the shortcut.
 const PASTE_ALLOWED_US = 2 * 60 * GLib.USEC_PER_SEC;
 
+const SHOW_INDICATOR_KEY = 'show-indicator';
+const INDICATOR_ICON = 'edit-paste-symbolic';
+
+// Top bar icon: left-click opens the clipboard history, right-click shows a menu.
+const LaccyIndicator = GObject.registerClass(
+class LaccyIndicator extends PanelMenu.Button {
+    _init(openHistory, openPreferences) {
+        super._init(0.5, 'Laccy');
+
+        this.add_child(new St.Icon({
+            icon_name: INDICATOR_ICON,
+            style_class: 'system-status-icon',
+        }));
+
+        this.menu.addAction('Open Clipboard History', openHistory);
+        this.menu.addAction('Preferences', openPreferences);
+
+        // PanelMenu.Button opens its menu on any click; split clicks by button instead.
+        this._clickGesture.set_enabled(false);
+
+        const leftClick = new Clutter.ClickGesture({required_button: Clutter.BUTTON_PRIMARY});
+        leftClick.set_recognize_on_press(true);
+        leftClick.connect('recognize', () => openHistory());
+        this.add_action(leftClick);
+
+        const rightClick = new Clutter.ClickGesture({required_button: Clutter.BUTTON_SECONDARY});
+        rightClick.set_recognize_on_press(true);
+        rightClick.connect('recognize', () => this.menu.toggle());
+        this.add_action(rightClick);
+    }
+});
+
 export default class LaccyExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
@@ -67,10 +101,19 @@ export default class LaccyExtension extends Extension {
             Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
             () => this._togglePopup());
+
+        this._indicator = null;
+        this._showIndicatorChangedId = this._settings.connect(`changed::${SHOW_INDICATOR_KEY}`,
+            () => this._syncIndicator());
+        this._syncIndicator();
     }
 
     disable() {
         Main.wm.removeKeybinding(TOGGLE_SHORTCUT_KEY);
+
+        this._settings.disconnect(this._showIndicatorChangedId);
+        this._indicator?.destroy();
+        this._indicator = null;
 
         this._dbus.unexport();
         this._dbus = null;
@@ -120,22 +163,54 @@ export default class LaccyExtension extends Extension {
         });
     }
 
-    _togglePopup() {
+    _syncIndicator() {
+        const show = this._settings.get_boolean(SHOW_INDICATOR_KEY);
+        if (show && !this._indicator) {
+            this._indicator = new LaccyIndicator(
+                () => this._togglePopup(),
+                () => this._openPreferences());
+            Main.panel.addToStatusArea(this.uuid, this._indicator);
+        } else if (!show && this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
+    }
+
+    _lookupApp() {
         const app = Shell.AppSystem.get_default().lookup_app(APP_DESKTOP_ID);
         if (!app) {
             Main.notifyError('Laccy is not installed',
                 `${APP_DESKTOP_ID} was not found. Run scripts/install-dev.sh.`);
-            return;
         }
+        return app;
+    }
 
-        const focusWindow = global.display.focus_window;
-        if (focusWindow && app.get_windows().includes(focusWindow)) {
-            focusWindow.delete(global.get_current_time());
+    _openPreferences() {
+        const app = this._lookupApp();
+        if (!app)
             return;
+
+        try {
+            app.launch_action('preferences', global.get_current_time(), -1);
+        } catch (e) {
+            Main.notifyError('Laccy could not open preferences', e.message);
         }
+    }
+
+    _togglePopup() {
+        const app = this._lookupApp();
+        if (!app)
+            return;
 
         this._pasteAllowedUntil = GLib.get_monotonic_time() + PASTE_ALLOWED_US;
-        app.activate();
+        // Launch instead of activating: activating a running app only raises
+        // its window (such as the preferences). The running laccy decides
+        // whether to open or close the popup.
+        try {
+            app.launch(0, -1, Shell.AppLaunchGpu.APP_PREF);
+        } catch (e) {
+            Main.notifyError('Laccy could not start', e.message);
+        }
     }
 
     // D-Bus method, called by the popup when an item is picked.

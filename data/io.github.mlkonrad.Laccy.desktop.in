@@ -8,3 +8,8 @@ Terminal=false
 Categories=GTK;Utility;
 Keywords=clipboard;history;copy;paste;
 StartupNotify=true
+Actions=preferences;
+
+[Desktop Action preferences]
+Name=Preferences
+Exec=@BINDIR@/laccy --preferences

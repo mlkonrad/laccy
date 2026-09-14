@@ -482,6 +482,7 @@ dependencies = [
 name = "laccy-core"
 version = "0.1.0"
 dependencies = [
+ "gio",
  "rusqlite",
 ]
 

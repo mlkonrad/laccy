@@ -1,11 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
+  <!-- Shared by the extension, the laccyd daemon and the laccy popup. -->
   <schema id="org.gnome.shell.extensions.laccy" path="/org/gnome/shell/extensions/laccy/">
     <!-- Keybinding names are global across all extensions, so this one is prefixed. -->
     <key name="laccy-toggle-shortcut" type="as">
       <default><![CDATA[['<Shift><Super>c']]]></default>
       <summary>Open Laccy</summary>
-      <description>Opens the clipboard history popup, or closes it when it is focused.</description>
+      <description>Opens the clipboard history popup, or closes it when it is open.</description>
+    </key>
+    <key name="paste-automatically" type="b">
+      <default>false</default>
+      <summary>Paste automatically</summary>
+      <description>Also paste into the focused app after picking an item, instead of only copying it. Alt+Enter does the opposite.</description>
+    </key>
+    <key name="history-size" type="u">
+      <range min="1" max="10000"/>
+      <default>200</default>
+      <summary>History size</summary>
+      <description>Number of unpinned items kept in history. Pinned items are always kept.</description>
+    </key>
+    <key name="ignored-apps" type="as">
+      <default>[]</default>
+      <summary>Ignored apps</summary>
+      <description>Desktop app IDs whose copies are never recorded, e.g. org.keepassxc.KeePassXC.desktop.</description>
+    </key>
+    <key name="show-indicator" type="b">
+      <default>true</default>
+      <summary>Show icon in top bar</summary>
+      <description>Shows a Laccy icon in the top bar. Click it to open the clipboard history; right-click it for more options.</description>
+    </key>
+    <key name="max-item-bytes" type="u">
+      <default>1048576</default>
+      <summary>Largest recorded copy</summary>
+      <description>Copies larger than this many bytes are not recorded.</description>
     </key>
   </schema>
 </schemalist>

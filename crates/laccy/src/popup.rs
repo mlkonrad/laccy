@@ -10,6 +10,18 @@ use laccy_core::{SHELL_BUS_NAME, SHELL_INTERFACE, SHELL_OBJECT_PATH, search};
 const PREVIEW_CHARS: usize = 100;
 /// Items reachable with Ctrl+1 … Ctrl+9.
 const NUMBERED_ITEMS: u32 = 9;
+/// Tells the popup apart from the preferences window.
+const WINDOW_NAME: &str = "laccy-popup";
+
+/// Opens the popup, or closes it if it's already open.
+pub fn toggle(app: &adw::Application) {
+    match app.windows().into_iter().find(|window| window.widget_name() == WINDOW_NAME) {
+        Some(window) => {
+            let _ = WidgetExt::activate_action(&window, "popup.close", None);
+        }
+        None => Popup::present(app),
+    }
+}
 
 pub struct Popup {
     window: adw::ApplicationWindow,
@@ -95,6 +107,7 @@ impl Popup {
             .content(&content)
             .build();
         search.set_key_capture_widget(Some(&window));
+        window.set_widget_name(WINDOW_NAME);
 
         Self {
             window,
@@ -115,6 +128,17 @@ impl Popup {
     }
 
     fn connect_signals(self: &Rc<Self>) {
+        // Lets `toggle` close the popup through the same path as Esc.
+        let close = gio::SimpleAction::new("close", None);
+        close.connect_activate(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_, _| popup.close()
+        ));
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&close);
+        self.window.insert_action_group("popup", Some(&actions));
+
         self.search.connect_search_changed(glib::clone!(
             #[weak(rename_to = popup)]
             self,
@@ -173,6 +197,7 @@ impl Popup {
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::SHIFT_MASK => {
                 self.confirm_clear()
             }
+            gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
             _ if mods == Mod::CONTROL_MASK => match key.to_unicode().and_then(|c| c.to_digit(10)) {
                 Some(digit @ 1..=NUMBERED_ITEMS) => self.pick(digit - 1, paste),
                 _ => return glib::Propagation::Proceed,
@@ -333,6 +358,13 @@ impl Popup {
             ),
         );
         dialog.present(Some(&self.window));
+    }
+
+    fn open_preferences(&self) {
+        if let Some(app) = self.window.application().and_downcast::<adw::Application>() {
+            crate::preferences::present(&app);
+        }
+        self.close();
     }
 
     /// Shows a banner when the extension isn't there to copy picked items.

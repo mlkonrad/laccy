@@ -1,8 +1,9 @@
 # Laccy
 
 A lightweight, keyboard-first clipboard manager for GNOME, inspired by
-[Maccy](https://github.com/p0deje/Maccy). Press **Shift+Super+C**, type to
-search, press **Enter** to copy, then paste wherever you like.
+[Maccy](https://github.com/p0deje/Maccy). Press **Shift+Super+C** (or click
+the clipboard icon in the top bar), type to search, press **Enter** to copy,
+then paste wherever you like.
 
 Laccy is an independent project. It is not affiliated with Maccy and doesn't
 share any code with it.
@@ -31,8 +32,8 @@ or type keys. Laccy is therefore three small parts:
 |---|---|---|
 | `extension/laccy@mlkonrad.github.com` | inside gnome-shell | Watches the clipboard, handles the shortcut, sets the clipboard and pastes |
 | `crates/laccyd` | background, D-Bus activated | Stores copied text; only glib and SQLite, no GTK |
-| `crates/laccy` | runs only while visible | The popup: search, pick, pin, delete |
-| `crates/laccy-core` | library | History database, search, config, D-Bus names |
+| `crates/laccy` | runs only while a window is open | The popup (search, pick, pin, delete) and the preferences window |
+| `crates/laccy-core` | library | History database, search, settings, D-Bus names |
 
 **Keeping it lightweight:** no GTK process runs while the popup is hidden.
 `laccy` starts on the shortcut and exits when it closes, `laccyd` is the only
@@ -52,7 +53,7 @@ Set `GSK_RENDERER` to override it. `laccyd` uses about 9 MB resident, 0.7 MB pri
 
 **Privacy:** copies marked as secret by password managers
 (`x-kde-passwordManagerHint`) are never recorded, and you can ignore whole
-apps (see [Configuration](#configuration)). Nothing is recorded while the
+apps (see [Preferences](#preferences)). Nothing is recorded while the
 screen is locked, because GNOME disables extensions then. History never
 leaves your machine.
 
@@ -84,45 +85,44 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Shift+Super+C | Open or close Laccy |
 | Type anything | Search |
 | ↑ / ↓ | Move the selection |
-| Enter / click | Copy the item (and paste it, if `paste_automatically = true`) |
+| Enter / click | Copy the item (and paste it, if Paste Automatically is on) |
 | Alt+Enter | The opposite of Enter: copy and paste, or copy only |
 | Ctrl+1 … Ctrl+9 | Pick the first nine items |
 | Alt+P | Pin or unpin (pinned items stay at the top) |
 | Alt+Delete | Delete the item |
 | Ctrl+Shift+Delete | Clear unpinned history |
+| Ctrl+, | Open preferences |
 | Esc | Close |
 
-To change the shortcut:
+## Preferences
+
+Open them with **Ctrl+,** in the popup, by right-clicking the clipboard icon
+in the top bar, by right-clicking Laccy in the app grid and choosing
+**Preferences**, or with `laccy --preferences`.
+
+- **Open Laccy:** the shortcut. Click it and press the new key combination.
+- **Paste Automatically:** also paste after picking an item (off by default).
+- **Show Icon in Top Bar:** click the icon to open the history, right-click it for a menu (on by default).
+- **History Size:** unpinned items to keep (200 by default).
+- **Ignored Apps:** apps whose copies are never recorded.
+
+Changes apply immediately. Settings are stored in GSettings with the
+extension's schema, so they also work from the command line:
 
 ```sh
 gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.github.com/schemas \
-  set org.gnome.shell.extensions.laccy laccy-toggle-shortcut "['<Super>v']"
-```
-
-## Configuration
-
-`~/.config/laccy/config` (optional; changes apply on the next copy or popup):
-
-```ini
-# Unpinned items to keep
-history_size = 200
-# Also paste into the focused app after picking an item (default: copy only)
-paste_automatically = false
-# Desktop app IDs whose copies are never recorded
-ignored_apps = org.keepassxc.KeePassXC.desktop, com.bitwarden.desktop.desktop
-# Larger copies are not recorded
-max_item_bytes = 1048576
+  list-recursively org.gnome.shell.extensions.laccy
 ```
 
 ## Known limitations
 
-- **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or `paste_automatically = true`) doesn't work there yet.
+- **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or Paste Automatically) doesn't work there yet.
 - **Text only.** Images and files are not recorded yet.
 - The popup opens where GNOME places new windows (Wayland apps can't choose their own position).
 
 ## Roadmap
 
-- [ ] Preferences window (history size, shortcut, ignored apps, auto-paste)
+- [x] Preferences window (shortcut, auto-paste, history size, ignored apps)
 - [ ] Terminal-aware paste (Ctrl+Shift+V when a terminal is focused)
 - [ ] Images and file copies
 - [ ] Fuzzy and regex search modes

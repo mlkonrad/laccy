@@ -24,11 +24,7 @@ pub fn history_path() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share").join("laccy/history.db")
 }
 
-pub fn config_path() -> PathBuf {
-    xdg_dir("XDG_CONFIG_HOME", ".config").join("laccy/config")
-}
-
-fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
+pub(crate) fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
     match std::env::var_os(var).map(PathBuf::from) {
         Some(dir) if dir.is_absolute() => dir,
         _ => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(fallback),
