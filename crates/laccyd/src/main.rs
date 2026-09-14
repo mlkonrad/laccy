@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gio::glib;
 use laccy_core::config::{self, Config};
 use laccy_core::history::{Content, History};
-use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH};
+use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL};
 
 const INTROSPECTION: &str = r#"
 <node>
@@ -26,6 +26,7 @@ const INTROSPECTION: &str = r#"
       <arg name="mime_type" type="s" direction="in"/>
       <arg name="source_app" type="s" direction="in"/>
     </method>
+    <signal name="HistoryChanged"/>
   </interface>
 </node>
 "#;
@@ -72,7 +73,7 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
 
     let registration = connection
         .register_object(DAEMON_OBJECT_PATH, &interface)
-        .method_call(move |_, _, _, _, method, params, invocation| {
+        .method_call(move |connection, _, _, _, method, params, invocation| {
             // GDBus has already checked the method and its argument types against the XML.
             let Some((content, source_app)) = parse_call(method, &params) else {
                 invocation.return_dbus_error("org.freedesktop.DBus.Error.InvalidArgs", method);
@@ -88,7 +89,19 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
             glib::spawn_future_local(async move {
                 let is_image = matches!(content, Content::Image { .. });
                 match record(&history, &config, content, &source_app).await {
-                    Ok(()) => invocation.return_value(None),
+                    Ok(()) => {
+                        invocation.return_value(None);
+                        let signal = connection.emit_signal(
+                            None,
+                            DAEMON_OBJECT_PATH,
+                            DAEMON_INTERFACE,
+                            HISTORY_CHANGED_SIGNAL,
+                            None,
+                        );
+                        if let Err(err) = signal {
+                            eprintln!("laccyd: cannot announce the new item: {err}");
+                        }
+                    }
                     Err(err) => {
                         eprintln!("laccyd: cannot store clipboard item: {err}");
                         invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &err.to_string());

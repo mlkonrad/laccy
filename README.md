@@ -23,7 +23,7 @@ or type keys. Laccy is therefore three small parts:
    ├─ clipboard changed ──AddText/AddImage/AddFiles──▶ laccyd (Rust, no UI)
    │                                   └─ SQLite ~/.local/share/laccy/history.db
    ├─ Shift+Super+C ──launches──▶ laccy popup (Rust, GTK 4 + libadwaita)
-   │                                   └─ reads the same database
+   │                                   └─ reads the same database, reloads on laccyd's HistoryChanged
    └─ ◀──SetClipboard/SetContent── laccy, when an item is picked
         sets the clipboard, then sends Ctrl+V if asked
 ```
@@ -140,7 +140,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Fuzzy search mode
 - [ ] Regex search mode
 - [ ] Paste without formatting
-- [ ] Live refresh while the popup is open
+- [x] Live refresh while the popup is open
 - [ ] App icon, Flatpak/RPM packaging, extensions.gnome.org release
 
 ## License

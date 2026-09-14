@@ -5,7 +5,10 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use laccy_core::config::Config;
 use laccy_core::history::{Content, History, Item, Kind};
-use laccy_core::{SHELL_BUS_NAME, SHELL_INTERFACE, SHELL_OBJECT_PATH, THUMBNAIL_SCALE, files, search};
+use laccy_core::{
+    DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, SHELL_BUS_NAME, SHELL_INTERFACE,
+    SHELL_OBJECT_PATH, THUMBNAIL_SCALE, files, search,
+};
 
 const PREVIEW_CHARS: usize = 100;
 /// Items reachable with Ctrl+1 … Ctrl+9.
@@ -39,6 +42,8 @@ pub struct Popup {
     objects: RefCell<Vec<glib::BoxedAnyObject>>,
     /// Normalized search text for each entry in `objects`.
     haystacks: RefCell<Vec<String>>,
+    /// Reloads when laccyd stores a copy; unsubscribes when the popup is gone.
+    history_changed: RefCell<Option<gio::SignalSubscription>>,
     was_active: Cell<bool>,
     closing: Cell<bool>,
 }
@@ -123,6 +128,7 @@ impl Popup {
             config,
             objects: RefCell::default(),
             haystacks: RefCell::default(),
+            history_changed: RefCell::default(),
             was_active: Cell::new(false),
             closing: Cell::new(false),
         }
@@ -175,6 +181,25 @@ impl Popup {
             move |_, key, _, state| popup.on_key(key, state)
         ));
         self.window.add_controller(keys);
+
+        // Copies made while the popup is open, like one from a script or Ctrl+C
+        // in the search entry, show up without reopening it.
+        if let Some(connection) = self.window.application().and_then(|app| app.dbus_connection()) {
+            let subscription = connection.subscribe_to_signal(
+                Some(DAEMON_BUS_NAME),
+                Some(DAEMON_INTERFACE),
+                Some(HISTORY_CHANGED_SIGNAL),
+                Some(DAEMON_OBJECT_PATH),
+                None,
+                gio::DBusSignalFlags::NONE,
+                glib::clone!(
+                    #[weak(rename_to = popup)]
+                    self,
+                    move |_| popup.reload()
+                ),
+            );
+            self.history_changed.replace(Some(subscription));
+        }
     }
 
     fn on_key(self: &Rc<Self>, key: gdk::Key, state: gdk::ModifierType) -> glib::Propagation {
@@ -208,7 +233,10 @@ impl Popup {
         glib::Propagation::Stop
     }
 
+    /// Reads the history again. The selected item stays selected if it's still
+    /// listed, so a copy arriving meanwhile doesn't change what Enter picks.
     fn reload(&self) {
+        let selected = self.item_at(self.selection.selected(), |item| item.id);
         let items = self.history.items().unwrap_or_else(|err| {
             eprintln!("laccy: cannot read history: {err}");
             Vec::new()
@@ -216,6 +244,11 @@ impl Popup {
         *self.haystacks.borrow_mut() = items.iter().map(haystack).collect();
         *self.objects.borrow_mut() = items.into_iter().map(glib::BoxedAnyObject::new).collect();
         self.apply_filter();
+        let position = selected
+            .and_then(|id| (0..self.store.n_items()).find(|&p| self.item_at(p, |item| item.id) == Some(id)));
+        if let Some(position) = position {
+            self.select(position);
+        }
     }
 
     fn apply_filter(&self) {
@@ -327,11 +360,8 @@ impl Popup {
             eprintln!("laccy: cannot update item: {err}");
             return;
         }
+        // Keeps the item selected at its new position.
         self.reload();
-        // Keep the item selected at its new position.
-        if let Some(position) = (0..self.store.n_items()).find(|&p| self.item_at(p, |item| item.id) == Some(id)) {
-            self.select(position);
-        }
     }
 
     fn delete_selected(&self) {

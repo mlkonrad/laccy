@@ -32,6 +32,8 @@ pub fn thumbnail_size(width: i32, height: i32) -> (i32, i32) {
 pub const DAEMON_BUS_NAME: &str = "io.github.mlkonrad.Laccy.Daemon";
 pub const DAEMON_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Daemon";
 pub const DAEMON_INTERFACE: &str = "io.github.mlkonrad.Laccy.Daemon1";
+/// Emitted by `laccyd` after it stores a copy, so an open popup can reload.
+pub const HISTORY_CHANGED_SIGNAL: &str = "HistoryChanged";
 
 /// Exported by the GNOME Shell extension from inside the gnome-shell process.
 pub const SHELL_BUS_NAME: &str = "org.gnome.Shell";
