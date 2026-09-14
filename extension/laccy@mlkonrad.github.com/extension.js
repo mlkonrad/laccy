@@ -34,11 +34,20 @@ const SHELL_INTERFACE_XML = `
       <arg name="text" type="s" direction="in"/>
       <arg name="paste" type="b" direction="in"/>
     </method>
+    <method name="SetContent">
+      <arg name="mime_type" type="s" direction="in"/>
+      <arg name="data" type="ay" direction="in"/>
+      <arg name="paste" type="b" direction="in"/>
+    </method>
   </interface>
 </node>`;
 
 // Password managers (KeePassXC, KDE apps) mark copied secrets with this type.
 const SECRET_MIME_TYPE = 'x-kde-passwordManagerHint';
+// Copied files, as file:// URIs.
+const URI_LIST_MIME_TYPE = 'text/uri-list';
+// The types St.Clipboard.get_text() reads.
+const TEXT_MIME_TYPES = ['text/plain;charset=utf-8', 'UTF8_STRING', 'text/plain', 'STRING'];
 
 // Gives focus time to return to the previous window after the popup closes.
 const PASTE_DELAY_MS = 100;
@@ -49,6 +58,7 @@ const PASTE_DELAY_MS = 100;
 const PASTE_ALLOWED_US = 2 * 60 * GLib.USEC_PER_SEC;
 
 const SHOW_INDICATOR_KEY = 'show-indicator';
+const MAX_IMAGE_BYTES_KEY = 'max-image-bytes';
 const INDICATOR_ICON = 'edit-paste-symbolic';
 
 // Top bar icon: left-click opens the clipboard history, right-click shows a menu.
@@ -85,8 +95,10 @@ export default class LaccyExtension extends Extension {
         this._settings = this.getSettings();
         this._pasteAllowedUntil = 0;
         this._pasteTimeoutId = 0;
-        this._ownText = null;
+        this._settingClipboard = false;
+        this._restoreIdleId = 0;
 
+        this._clipboard = St.Clipboard.get_default();
         this._selection = global.display.get_selection();
         this._ownerChangedId = this._selection.connect('owner-changed',
             (_selection, type, source) => this._onOwnerChanged(type, source));
@@ -120,6 +132,8 @@ export default class LaccyExtension extends Extension {
 
         this._selection.disconnect(this._ownerChangedId);
         this._selection = null;
+        this._clipboard = null;
+        this._stopWatchingForRestore();
 
         if (this._pasteTimeoutId) {
             GLib.Source.remove(this._pasteTimeoutId);
@@ -128,39 +142,109 @@ export default class LaccyExtension extends Extension {
         this._keyboard.run_dispose();
         this._keyboard = null;
         this._settings = null;
-        this._ownText = null;
     }
 
     _onOwnerChanged(type, source) {
-        if (type !== Meta.SelectionType.SELECTION_CLIPBOARD || !source)
+        if (type !== Meta.SelectionType.SELECTION_CLIPBOARD)
             return;
-        if (source.get_mimetypes().includes(SECRET_MIME_TYPE))
+        if (!source) {
+            this._watchForRestore();
+            return;
+        }
+        // When the app that owns the clipboard quits, GNOME keeps what it
+        // copied by offering a copy from memory. That was recorded already.
+        const restored = this._restoreIdleId !== 0 && source instanceof Meta.SelectionSourceMemory;
+        this._stopWatchingForRestore();
+        // Picked in the popup, which has already moved the item to the top.
+        if (restored || this._settingClipboard)
+            return;
+        const mimeTypes = source.get_mimetypes();
+        if (mimeTypes.includes(SECRET_MIME_TYPE))
             return;
 
         // Windows without a desktop file get made-up IDs like "window:3"; don't record those.
         const focusAppId = Shell.WindowTracker.get_default().focus_app?.get_id() ?? '';
         const sourceApp = focusAppId.startsWith('window:') ? '' : focusAppId;
-        St.Clipboard.get_default().get_text(St.ClipboardType.CLIPBOARD, (_clipboard, text) => {
-            if (!this._selection || !text)
-                return;
 
-            // Text picked in the popup: moves to the top, but it wasn't copied
-            // from whichever app has focus now.
-            const fromLaccy = text === this._ownText;
-            this._ownText = null;
+        // File managers also offer the paths as text, so files come first. Apps
+        // that offer text next to an image (like spreadsheets) are recorded as text.
+        const imageType = mimeTypes.includes('image/png')
+            ? 'image/png' : mimeTypes.find(mimeType => mimeType.startsWith('image/'));
+        if (mimeTypes.includes(URI_LIST_MIME_TYPE))
+            this._recordFiles(sourceApp);
+        else if (imageType && !mimeTypes.some(mimeType => TEXT_MIME_TYPES.includes(mimeType)))
+            this._recordImage(imageType, sourceApp);
+        else
+            this._recordText(sourceApp);
+    }
 
-            Gio.DBus.session.call(
-                DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, 'AddText',
-                new GLib.Variant('(ss)', [text, fromLaccy ? '' : sourceApp]),
-                null, Gio.DBusCallFlags.NONE, -1, null,
-                (connection, result) => {
-                    try {
-                        connection.call_finish(result);
-                    } catch (e) {
-                        console.warn(`Laccy: could not record clipboard item: ${e.message}`);
-                    }
-                });
+    // GNOME offers its copy before the current main loop dispatch ends, if it
+    // kept one. Anything else from memory, like a screenshot, comes later.
+    _watchForRestore() {
+        this._stopWatchingForRestore();
+        this._restoreIdleId = GLib.idle_add(GLib.PRIORITY_HIGH, () => {
+            this._restoreIdleId = 0;
+            return GLib.SOURCE_REMOVE;
         });
+    }
+
+    _stopWatchingForRestore() {
+        if (this._restoreIdleId) {
+            GLib.Source.remove(this._restoreIdleId);
+            this._restoreIdleId = 0;
+        }
+    }
+
+    _recordText(sourceApp) {
+        this._clipboard.get_text(St.ClipboardType.CLIPBOARD, (_clipboard, text) => {
+            if (this._selection && text)
+                this._callDaemon('AddText', new GLib.Variant('(ss)', [text, sourceApp]));
+        });
+    }
+
+    _recordFiles(sourceApp) {
+        this._clipboard.get_content(St.ClipboardType.CLIPBOARD, URI_LIST_MIME_TYPE, (_clipboard, bytes) => {
+            if (!this._selection)
+                return;
+            const uris = bytes?.get_size()
+                ? new TextDecoder().decode(bytes.toArray()).split(/\r?\n/)
+                    .map(line => line.trim())
+                    .filter(line => line && !line.startsWith('#'))
+                : [];
+            // Links can come as a URI list too; those are recorded as text.
+            if (uris.length > 0 && uris.every(uri => uri.startsWith('file://')))
+                this._callDaemon('AddFiles', new GLib.Variant('(ass)', [uris, sourceApp]));
+            else
+                this._recordText(sourceApp);
+        });
+    }
+
+    _recordImage(mimeType, sourceApp) {
+        this._clipboard.get_content(St.ClipboardType.CLIPBOARD, mimeType, (_clipboard, bytes) => {
+            if (!this._selection || !bytes?.get_size())
+                return;
+            // The daemon would drop it anyway; don't send it over D-Bus.
+            if (bytes.get_size() > this._settings.get_uint(MAX_IMAGE_BYTES_KEY))
+                return;
+            this._callDaemon('AddImage', GLib.Variant.new_tuple([
+                GLib.Variant.new_from_bytes(new GLib.VariantType('ay'), bytes, true),
+                new GLib.Variant('s', mimeType),
+                new GLib.Variant('s', sourceApp),
+            ]));
+        });
+    }
+
+    _callDaemon(method, parameters) {
+        Gio.DBus.session.call(
+            DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, method, parameters,
+            null, Gio.DBusCallFlags.NONE, -1, null,
+            (connection, result) => {
+                try {
+                    connection.call_finish(result);
+                } catch (e) {
+                    console.warn(`Laccy: could not record clipboard item: ${e.message}`);
+                }
+            });
     }
 
     _syncIndicator() {
@@ -213,10 +297,31 @@ export default class LaccyExtension extends Extension {
         }
     }
 
-    // D-Bus method, called by the popup when an item is picked.
+    // D-Bus method, called by the popup when a text item is picked.
     SetClipboard(text, paste) {
-        this._ownText = text;
-        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
+        this._setClipboard(() => this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text));
+        this._pasteIfAllowed(paste);
+    }
+
+    // D-Bus method, called by the popup when an image or files are picked.
+    SetContent(mimeType, data, paste) {
+        this._setClipboard(() =>
+            this._clipboard.set_content(St.ClipboardType.CLIPBOARD, mimeType, new GLib.Bytes(data)));
+        this._pasteIfAllowed(paste);
+    }
+
+    // Setting the clipboard emits owner-changed right away, which this flag
+    // tells apart from copies made in other apps.
+    _setClipboard(set) {
+        this._settingClipboard = true;
+        try {
+            set();
+        } finally {
+            this._settingClipboard = false;
+        }
+    }
+
+    _pasteIfAllowed(paste) {
         if (!paste)
             return;
 

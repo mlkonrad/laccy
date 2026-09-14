@@ -41,7 +41,12 @@
     <key name="max-item-bytes" type="u">
       <default>1048576</default>
       <summary>Largest recorded copy</summary>
-      <description>Copies larger than this many bytes are not recorded.</description>
+      <description>Text and file copies larger than this many bytes are not recorded.</description>
+    </key>
+    <key name="max-image-bytes" type="u">
+      <default>10485760</default>
+      <summary>Largest recorded image</summary>
+      <description>Copied images larger than this many bytes are not recorded.</description>
     </key>
   </schema>
 </schemalist>

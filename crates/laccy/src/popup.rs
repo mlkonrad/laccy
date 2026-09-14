@@ -4,8 +4,8 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use laccy_core::config::Config;
-use laccy_core::history::{History, Item};
-use laccy_core::{SHELL_BUS_NAME, SHELL_INTERFACE, SHELL_OBJECT_PATH, search};
+use laccy_core::history::{Content, History, Item, Kind};
+use laccy_core::{SHELL_BUS_NAME, SHELL_INTERFACE, SHELL_OBJECT_PATH, THUMBNAIL_SCALE, files, search};
 
 const PREVIEW_CHARS: usize = 100;
 /// Items reachable with Ctrl+1 … Ctrl+9.
@@ -32,7 +32,8 @@ pub struct Popup {
     list: gtk::ListView,
     store: gio::ListStore,
     selection: gtk::SingleSelection,
-    history: History,
+    /// Shared with the rows, which load image thumbnails as they're shown.
+    history: Rc<History>,
     config: Config,
     /// Every history item, in history order.
     objects: RefCell<Vec<glib::BoxedAnyObject>>,
@@ -51,7 +52,7 @@ impl Popup {
                 return;
             }
         };
-        let popup = Rc::new(Self::build(app, history, Config::load()));
+        let popup = Rc::new(Self::build(app, Rc::new(history), Config::load()));
         // Signal handlers only hold weak references, so the window has to keep
         // the popup alive; otherwise every handler silently does nothing.
         let keep_alive = RefCell::new(Some(Rc::clone(&popup)));
@@ -62,10 +63,10 @@ impl Popup {
         popup.window.present();
     }
 
-    fn build(app: &adw::Application, history: History, config: Config) -> Self {
+    fn build(app: &adw::Application, history: Rc<History>, config: Config) -> Self {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::SingleSelection::new(Some(store.clone()));
-        let list = gtk::ListView::new(Some(selection.clone()), Some(row_factory()));
+        let list = gtk::ListView::new(Some(selection.clone()), Some(row_factory(Rc::clone(&history))));
         list.set_single_click_activate(true);
         list.add_css_class("navigation-sidebar");
 
@@ -212,7 +213,7 @@ impl Popup {
             eprintln!("laccy: cannot read history: {err}");
             Vec::new()
         });
-        *self.haystacks.borrow_mut() = items.iter().map(|item| search::normalize(&item.excerpt)).collect();
+        *self.haystacks.borrow_mut() = items.iter().map(haystack).collect();
         *self.objects.borrow_mut() = items.into_iter().map(glib::BoxedAnyObject::new).collect();
         self.apply_filter();
     }
@@ -227,7 +228,7 @@ impl Popup {
 
         if objects.is_empty() {
             self.empty.set_title("No Clipboard History");
-            self.empty.set_description(Some("Copied text will show up here"));
+            self.empty.set_description(Some("Copied text, images and files will show up here"));
         } else {
             self.empty.set_title("No Results");
             self.empty.set_description(None);
@@ -266,8 +267,8 @@ impl Popup {
         let Some(id) = self.item_at(position, |item| item.id) else {
             return;
         };
-        let text = match self.history.text(id) {
-            Ok(Some(text)) => text,
+        let content = match self.history.content(id) {
+            Ok(Some(content)) => content,
             Ok(None) => return,
             Err(err) => {
                 eprintln!("laccy: cannot read item: {err}");
@@ -282,6 +283,19 @@ impl Popup {
             return;
         };
 
+        let (method, parameters) = match content {
+            Content::Text(text) => ("SetClipboard", (text, paste).to_variant()),
+            Content::Files(uris) => {
+                ("SetContent", set_content_parameters(files::MIME_TYPE, files::uri_list(&uris).as_bytes(), paste))
+            }
+            Content::Image { mime_type, data } => ("SetContent", set_content_parameters(&mime_type, &data, paste)),
+        };
+        // The extension doesn't record clipboard changes it makes itself, so
+        // move the item to the top here.
+        if let Err(err) = self.history.touch(id) {
+            eprintln!("laccy: cannot update item: {err}");
+        }
+
         // Stay alive until the extension replies, even though the window is gone.
         let hold = app.hold();
         // Closing first returns focus to the previous window before the paste.
@@ -290,8 +304,8 @@ impl Popup {
             Some(SHELL_BUS_NAME),
             SHELL_OBJECT_PATH,
             SHELL_INTERFACE,
-            "SetClipboard",
-            Some(&(text, paste).to_variant()),
+            method,
+            Some(&parameters),
             None,
             gio::DBusCallFlags::NONE,
             5000,
@@ -397,12 +411,62 @@ impl Popup {
     }
 }
 
-fn row_factory() -> gtk::SignalListItemFactory {
+/// What the search looks through: the text itself, or the paths of copied
+/// files. Images have nothing to search, so they only show without a query.
+fn haystack(item: &Item) -> String {
+    match item.kind {
+        Kind::Text => search::normalize(&item.excerpt),
+        Kind::Files => search::normalize(&item.excerpt.lines().map(files::display_path).collect::<Vec<_>>().join("\n")),
+        Kind::Image => String::new(),
+    }
+}
+
+/// Arguments of the extension's `SetContent` method.
+fn set_content_parameters(mime_type: &str, data: &[u8], paste: bool) -> glib::Variant {
+    glib::Variant::tuple_from_iter([
+        mime_type.to_variant(),
+        glib::Variant::array_from_fixed_array(data),
+        paste.to_variant(),
+    ])
+}
+
+fn thumbnail_texture(history: &History, id: i64) -> Option<gdk::Texture> {
+    let png = history
+        .thumbnail(id)
+        .inspect_err(|err| eprintln!("laccy: cannot read thumbnail: {err}"))
+        .ok()??;
+    gdk::Texture::from_bytes(&glib::Bytes::from_owned(png))
+        .inspect_err(|err| eprintln!("laccy: cannot load thumbnail: {err}"))
+        .ok()
+}
+
+/// The icon of a copied file's type, or a generic one for several files.
+fn files_icon(uris: &[&str]) -> gio::Icon {
+    match uris {
+        [uri] => gio::content_type_get_symbolic_icon(&gio::content_type_guess(Some(files::display_name(uri)), None).0),
+        _ => gio::ThemedIcon::new("folder-documents-symbolic").upcast(),
+    }
+}
+
+fn row_factory(history: Rc<History>) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
 
     factory.connect_setup(|_, list_item| {
         let list_item = list_item.downcast_ref::<gtk::ListItem>().expect("factory creates list items");
         let pin = gtk::Image::from_icon_name("view-pin-symbolic");
+        let icon = gtk::Image::new();
+        let picture = gtk::Picture::builder()
+            .can_shrink(true)
+            .content_fit(gtk::ContentFit::ScaleDown)
+            .alternative_text("Image")
+            .build();
+        // A picture asks to be as wide as its image has pixels; the clamp keeps
+        // it to the width it's shown at.
+        let thumbnail = adw::Clamp::builder()
+            .child(&picture)
+            .tightening_threshold(0)
+            .halign(gtk::Align::Start)
+            .build();
         let label = gtk::Label::builder()
             .xalign(0.0)
             .hexpand(true)
@@ -417,6 +481,8 @@ fn row_factory() -> gtk::SignalListItemFactory {
         row.set_margin_top(2);
         row.set_margin_bottom(2);
         row.append(&pin);
+        row.append(&icon);
+        row.append(&thumbnail);
         row.append(&label);
         row.append(&shortcut);
         list_item.set_child(Some(&row));
@@ -431,17 +497,46 @@ fn row_factory() -> gtk::SignalListItemFactory {
         });
     });
 
-    factory.connect_bind(|_, list_item| {
+    factory.connect_bind(move |_, list_item| {
         let list_item = list_item.downcast_ref::<gtk::ListItem>().expect("factory creates list items");
         let object = list_item.item().and_downcast::<glib::BoxedAnyObject>().expect("store holds items");
         let item = object.borrow::<Item>();
         let row = list_item.child().expect("row was set up");
         let pin = row.first_child().expect("row has a pin icon");
-        let label = pin.next_sibling().and_downcast::<gtk::Label>().expect("row has a label");
+        let icon = pin.next_sibling().and_downcast::<gtk::Image>().expect("row has a kind icon");
+        let thumbnail = icon.next_sibling().and_downcast::<adw::Clamp>().expect("row has a thumbnail");
+        let picture = thumbnail.child().and_downcast::<gtk::Picture>().expect("thumbnail has a picture");
+        let label = thumbnail.next_sibling().and_downcast::<gtk::Label>().expect("row has a label");
         let shortcut = label.next_sibling().and_downcast::<gtk::Label>().expect("row has a shortcut label");
 
         pin.set_visible(item.pinned);
-        label.set_text(&laccy_core::preview(&item.excerpt, PREVIEW_CHARS));
+
+        // Loaded per row, so only the thumbnails on screen are ever decoded.
+        let texture = (item.kind == Kind::Image).then(|| thumbnail_texture(&history, item.id)).flatten();
+        if let Some(texture) = &texture {
+            let (width, height) = (texture.width() / THUMBNAIL_SCALE, texture.height() / THUMBNAIL_SCALE);
+            picture.set_size_request(width.max(1), height.max(1));
+            thumbnail.set_maximum_size(width.max(1));
+        }
+        picture.set_paintable(texture.as_ref());
+        thumbnail.set_visible(texture.is_some());
+
+        let (kind_icon, text) = match item.kind {
+            Kind::Text => (None, laccy_core::preview(&item.excerpt, PREVIEW_CHARS)),
+            Kind::Files => {
+                let uris: Vec<&str> = item.excerpt.lines().collect();
+                let names: Vec<String> = uris.iter().map(|uri| files::display_name(uri)).collect();
+                (Some(files_icon(&uris)), laccy_core::preview(&names.join(", "), PREVIEW_CHARS))
+            }
+            Kind::Image if texture.is_some() => (None, String::new()),
+            // Without a thumbnail, at least say what it is.
+            Kind::Image => (Some(gio::ThemedIcon::new("image-x-generic-symbolic").upcast()), "Image".to_owned()),
+        };
+        icon.set_visible(kind_icon.is_some());
+        if let Some(kind_icon) = &kind_icon {
+            icon.set_from_gicon(kind_icon);
+        }
+        label.set_text(&text);
         shortcut.set_text(&match list_item.position() {
             p if p < NUMBERED_ITEMS => format!("Ctrl+{}", p + 1),
             _ => String::new(),

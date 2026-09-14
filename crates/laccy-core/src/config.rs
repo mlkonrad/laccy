@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use gio::prelude::*;
 
-use crate::search;
+use crate::history::Content;
+use crate::{files, search};
 
 pub const SCHEMA_ID: &str = "org.gnome.shell.extensions.laccy";
 pub const EXTENSION_UUID: &str = "laccy@mlkonrad.github.com";
@@ -16,6 +17,8 @@ pub const PASTE_AUTOMATICALLY_KEY: &str = "paste-automatically";
 pub const HISTORY_SIZE_KEY: &str = "history-size";
 pub const IGNORED_APPS_KEY: &str = "ignored-apps";
 pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
+/// Also read by the extension, so it doesn't send the daemon images it would drop.
+pub const MAX_IMAGE_BYTES_KEY: &str = "max-image-bytes";
 pub const SEARCH_MODE_KEY: &str = "search-mode";
 /// Only read by the extension, which adds or removes its top bar icon.
 pub const SHOW_INDICATOR_KEY: &str = "show-indicator";
@@ -29,8 +32,10 @@ pub struct Config {
     pub paste_automatically: bool,
     /// Desktop app IDs whose copies are never recorded, e.g. `org.keepassxc.KeePassXC.desktop`.
     pub ignored_apps: Vec<String>,
-    /// Copies larger than this are not recorded.
+    /// Text and file copies larger than this are not recorded.
     pub max_item_bytes: usize,
+    /// Image copies larger than this are not recorded.
+    pub max_image_bytes: usize,
     /// How the popup matches the search query.
     pub search_mode: search::Mode,
 }
@@ -44,6 +49,7 @@ impl Default for Config {
             paste_automatically: false,
             ignored_apps: Vec::new(),
             max_item_bytes: 1024 * 1024,
+            max_image_bytes: 10 * 1024 * 1024,
             search_mode: search::Mode::Exact,
         }
     }
@@ -61,12 +67,31 @@ impl Config {
             paste_automatically: settings.boolean(PASTE_AUTOMATICALLY_KEY),
             ignored_apps: settings.strv(IGNORED_APPS_KEY).iter().map(ToString::to_string).collect(),
             max_item_bytes: settings.uint(MAX_ITEM_BYTES_KEY) as usize,
+            max_image_bytes: settings.uint(MAX_IMAGE_BYTES_KEY) as usize,
             search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
         }
     }
 
     pub fn is_ignored(&self, app_id: &str) -> bool {
         !app_id.is_empty() && self.ignored_apps.iter().any(|ignored| ignored == app_id)
+    }
+
+    /// Whether a copy of `content` from `source_app` should be recorded.
+    pub fn should_record(&self, content: &Content, source_app: &str) -> bool {
+        if self.is_ignored(source_app) {
+            return false;
+        }
+        match content {
+            Content::Text(text) => !text.trim().is_empty() && text.len() <= self.max_item_bytes,
+            Content::Files(uris) => {
+                !uris.is_empty()
+                    && uris.iter().map(String::len).sum::<usize>() <= self.max_item_bytes
+                    && uris.iter().all(|uri| files::path(uri).is_some())
+            }
+            Content::Image { mime_type, data } => {
+                mime_type.starts_with("image/") && !data.is_empty() && data.len() <= self.max_image_bytes
+            }
+        }
     }
 }
 
@@ -152,6 +177,34 @@ mod tests {
         assert_eq!(config.search_mode, search::Mode::Fuzzy);
         assert!(config.is_ignored("org.keepassxc.KeePassXC.desktop"));
         assert!(!config.is_ignored(""));
+    }
+
+    #[test]
+    fn records_only_acceptable_copies() {
+        let config = Config {
+            max_item_bytes: 20,
+            max_image_bytes: 4,
+            ignored_apps: vec!["secret.desktop".to_owned()],
+            ..Config::default()
+        };
+        let text = |text: &str| Content::Text(text.to_owned());
+        let files = |uris: &[&str]| Content::Files(uris.iter().map(|uri| uri.to_string()).collect());
+        let image = |mime_type: &str, data: &[u8]| Content::Image { mime_type: mime_type.to_owned(), data: data.to_vec() };
+
+        assert!(config.should_record(&text("hello"), ""));
+        assert!(!config.should_record(&text("hello"), "secret.desktop"));
+        assert!(!config.should_record(&text(" \n\t"), ""));
+        assert!(!config.should_record(&text(&"x".repeat(21)), ""));
+
+        assert!(config.should_record(&files(&["file:///a", "file:///b"]), ""));
+        assert!(!config.should_record(&files(&[]), ""));
+        assert!(!config.should_record(&files(&["file:///a", "https://example.com/"]), ""));
+        assert!(!config.should_record(&files(&["file:///aaaaaaaaaa", "file:///bbbbbbbbbb"]), ""));
+
+        assert!(config.should_record(&image("image/png", b"1234"), ""));
+        assert!(!config.should_record(&image("image/png", b""), ""));
+        assert!(!config.should_record(&image("image/png", b"12345"), ""));
+        assert!(!config.should_record(&image("text/html", b"1234"), ""));
     }
 
     #[test]

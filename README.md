@@ -10,7 +10,7 @@ share any code with it.
 
 ## Status
 
-Early scaffold. It records and pastes text on GNOME 50 (Wayland).
+Early scaffold. It records and pastes text, images and files on GNOME 50 (Wayland).
 See the [roadmap](#roadmap).
 
 ## How it works
@@ -20,25 +20,28 @@ or type keys. Laccy is therefore three small parts:
 
 ```
  GNOME Shell extension (JS, runs inside gnome-shell)
-   ├─ clipboard changed ──AddText──▶ laccyd (Rust, no UI)
+   ├─ clipboard changed ──AddText/AddImage/AddFiles──▶ laccyd (Rust, no UI)
    │                                   └─ SQLite ~/.local/share/laccy/history.db
    ├─ Shift+Super+C ──launches──▶ laccy popup (Rust, GTK 4 + libadwaita)
    │                                   └─ reads the same database
-   └─ ◀──SetClipboard(text, paste)── laccy, when an item is picked
-        sets the clipboard, then sends Ctrl+V
+   └─ ◀──SetClipboard/SetContent── laccy, when an item is picked
+        sets the clipboard, then sends Ctrl+V if asked
 ```
 
 | Part | Where | Role |
 |---|---|---|
 | `extension/laccy@mlkonrad.github.com` | inside gnome-shell | Watches the clipboard, handles the shortcut, sets the clipboard and pastes |
-| `crates/laccyd` | background, D-Bus activated | Stores copied text; only glib and SQLite, no GTK |
+| `crates/laccyd` | background, D-Bus activated | Stores copies; only glib and SQLite, no GTK |
 | `crates/laccy` | runs only while a window is open | The popup (search, pick, pin, delete) and the preferences window |
 | `crates/laccy-core` | library | History database, search, settings, D-Bus names |
 
 **Keeping it lightweight:** no GTK process runs while the popup is hidden.
 `laccy` starts on the shortcut and exits when it closes, `laccyd` is the only
 thing that stays running, and the popup loads only a 10,000-character excerpt
-of each item.
+of each item. Images show as small thumbnails, made once when they're copied
+by a `laccy --thumbnail` process that exits right away (image decoders hold on
+to memory, so they never load in `laccyd`). The popup only decodes the
+thumbnails on screen.
 
 The popup renders with GTK's Cairo renderer instead of the GPU. Measured on
 GNOME 50 with 200 items (median of warm launches):
@@ -50,12 +53,20 @@ GNOME 50 with 200 items (median of warm launches):
 | **Cairo (Laccy default)** | **300 ms** | **60 MB** | **17 MB** |
 
 Set `GSK_RENDERER` to override it. `laccyd` uses about 9 MB resident, 0.7 MB private.
+Copied images pass through it, so after large ones it keeps up to about two
+images' worth of buffers: 12 MB more private memory after 6 MB screenshots.
 
 **Privacy:** copies marked as secret by password managers
 (`x-kde-passwordManagerHint`) are never recorded, and you can ignore whole
 apps (see [Preferences](#preferences)). Nothing is recorded while the
 screen is locked, because GNOME disables extensions then. History never
 leaves your machine.
+
+## Images and files
+
+- **Files** copied in Files (or any app that copies a list of `file://` URIs) are recorded as files. Picking them copies the files again, so you can paste them into a folder or an upload dialog. Search matches their paths.
+- **Images** (screenshots, *Copy Image* in a browser) are recorded when the app offers an image and no text. Apps that offer text next to an image, like spreadsheets, are recorded as text. Images have no text to search, so they only show while the search is empty.
+- Images larger than 10 MB aren't recorded. Change the limit, in bytes, with the `max-image-bytes` setting (see [Preferences](#preferences)).
 
 ## Build and install
 
@@ -118,14 +129,14 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 ## Known limitations
 
 - **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or Paste Automatically) doesn't work there yet.
-- **Text only.** Images and files are not recorded yet.
+- **Images are kept at full size** in the history database, so a long history of screenshots takes disk space.
 - The popup opens where GNOME places new windows (Wayland apps can't choose their own position).
 
 ## Roadmap
 
 - [x] Preferences window (shortcut, auto-paste, history size, ignored apps)
 - [ ] Terminal-aware paste (Ctrl+Shift+V when a terminal is focused)
-- [ ] Images and file copies
+- [x] Images and file copies
 - [x] Fuzzy search mode
 - [ ] Regex search mode
 - [ ] Paste without formatting
