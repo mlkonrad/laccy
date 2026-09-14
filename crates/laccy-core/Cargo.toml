@@ -1,0 +1,10 @@
+[package]
+name = "laccy-core"
+description = "History storage, search and configuration shared by laccy and laccyd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rusqlite.workspace = true

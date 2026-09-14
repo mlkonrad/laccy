@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/laccy-core", "crates/laccyd", "crates/laccy"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+laccy-core = { path = "crates/laccy-core" }
+rusqlite = { version = "0.40", features = ["bundled"] }
+gio = "0.22"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

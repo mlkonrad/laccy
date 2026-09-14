@@ -1,0 +1,11 @@
+[package]
+name = "laccyd"
+description = "Records clipboard changes reported by Laccy's GNOME Shell extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+laccy-core.workspace = true
+gio.workspace = true

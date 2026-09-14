@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Laccy
+Comment=Clipboard history
+Exec=@BINDIR@/laccy
+Icon=edit-paste-symbolic
+Terminal=false
+Categories=GTK;Utility;
+Keywords=clipboard;history;copy;paste;
+StartupNotify=true
