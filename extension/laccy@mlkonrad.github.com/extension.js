@@ -17,6 +17,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 const APP_DESKTOP_ID = 'io.github.mlkonrad.Laccy.desktop';
+// The popup window, told apart from the preferences window by its title.
+const APP_ID = 'io.github.mlkonrad.Laccy';
+const POPUP_TITLE = 'Laccy';
 
 // Keybinding names are shared by all extensions (Caffeine also has a
 // "toggle-shortcut"), so ours needs a prefix or GNOME refuses to add it.
@@ -54,13 +57,12 @@ const FORMAT_MIME_TYPES = ['text/html', 'text/rtf', 'application/rtf'];
 // Offered by the laccy popup next to a formatted item it put back (PICKED_MIME_TYPE in laccy-core).
 const PICKED_MIME_TYPE = 'application/x-laccy-picked';
 
-// Gives focus time to return to the previous window after the popup closes.
-const PASTE_DELAY_MS = 100;
-// Keys still held from picking (Alt+Enter, Alt+Shift+Enter) would reach the app
-// together with Ctrl+V, turning it into another shortcut, so pasting waits for
-// them to be released: checking this often, for up to this long.
-const HELD_KEYS_POLL_MS = 20;
-const HELD_KEYS_WAIT_MS = 5000;
+// Pasting waits until the popup has given focus back, since Ctrl+V goes to the
+// focused window, and until keys still held from picking (Alt+Enter,
+// Alt+Shift+Enter) are released, since they would turn Ctrl+V into another
+// shortcut. It checks this often, for up to this long.
+const PASTE_POLL_MS = 10;
+const PASTE_WAIT_MS = 5000;
 const HELD_KEYS_MASK = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK |
     Clutter.ModifierType.SUPER_MASK | Clutter.ModifierType.HYPER_MASK | Clutter.ModifierType.META_MASK;
 
@@ -116,6 +118,9 @@ export default class LaccyExtension extends Extension {
         this._ownerChangedId = this._selection.connect('owner-changed',
             (_selection, type, source) => this._onOwnerChanged(type, source));
 
+        this._windowCreatedId = global.display.connect('window-created',
+            (_display, window) => this._onWindowCreated(window));
+
         this._keyboard = global.stage.context.get_backend().get_default_seat()
             .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
 
@@ -143,6 +148,9 @@ export default class LaccyExtension extends Extension {
         this._dbus.unexport();
         this._dbus = null;
 
+        global.display.disconnect(this._windowCreatedId);
+        for (const actor of global.get_window_actors())
+            actor.meta_window.disconnectObject(this);
         this._selection.disconnect(this._ownerChangedId);
         this._selection = null;
         this._clipboard = null;
@@ -300,6 +308,36 @@ export default class LaccyExtension extends Extension {
             });
     }
 
+    // The popup opens and closes without GNOME's window animations, which take
+    // 150 ms each way to settle. A Wayland window gets its title and app ID
+    // after it's created but before it's shown, so check again as they arrive.
+    _onWindowCreated(window) {
+        const actor = window.get_compositor_private();
+        if (!actor)
+            return;
+        const skipIfPopup = () => {
+            if (!this._isPopup(window))
+                return;
+            window.disconnectObject(this);
+            Main.wm.skipNextEffect(actor);
+            // Mapping uses up that skip; this one is for closing.
+            const firstFrameId = actor.connect('first-frame', () => {
+                actor.disconnect(firstFrameId);
+                Main.wm.skipNextEffect(actor);
+            });
+        };
+        window.connectObject(
+            'notify::title', skipIfPopup,
+            'notify::wm-class', skipIfPopup,
+            'shown', () => window.disconnectObject(this),
+            this);
+        skipIfPopup();
+    }
+
+    _isPopup(window) {
+        return window?.get_wm_class() === APP_ID && window.get_title() === POPUP_TITLE;
+    }
+
     _syncIndicator() {
         const show = this._settings.get_boolean(SHOW_INDICATOR_KEY);
         if (show && !this._indicator) {
@@ -393,20 +431,20 @@ export default class LaccyExtension extends Extension {
         if (this._pasteTimeoutId)
             GLib.Source.remove(this._pasteTimeoutId);
         const start = GLib.get_monotonic_time();
-        this._pasteTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HELD_KEYS_POLL_MS, () => {
-            const elapsedMs = (GLib.get_monotonic_time() - start) / 1000;
-            if (elapsedMs < PASTE_DELAY_MS)
-                return GLib.SOURCE_CONTINUE;
+        this._pasteTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PASTE_POLL_MS, () => {
+            const popupFocused = this._isPopup(global.display.focus_window);
             const [, , mods] = global.get_pointer();
             const held = (mods & HELD_KEYS_MASK) !== 0;
-            if (held && elapsedMs < HELD_KEYS_WAIT_MS)
+            if ((popupFocused || held) && GLib.get_monotonic_time() - start < PASTE_WAIT_MS * 1000)
                 return GLib.SOURCE_CONTINUE;
 
             this._pasteTimeoutId = 0;
-            if (held)
-                console.warn('Laccy: not pasting, because modifier keys are still held');
-            else
+            if (popupFocused || held) {
+                const reason = held ? 'modifier keys are still held' : 'the popup still has focus';
+                console.warn(`Laccy: not pasting, because ${reason}`);
+            } else {
                 this._sendPasteKeys();
+            }
             return GLib.SOURCE_REMOVE;
         });
     }

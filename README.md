@@ -42,7 +42,9 @@ and the popup loads only a 10,000-character excerpt
 of each item. Images show as small thumbnails, made once when they're copied
 by a `laccy --thumbnail` process that exits right away (image decoders hold on
 to memory, so they never load in `laccyd`). The popup only decodes the
-thumbnails on screen.
+thumbnails on screen. It opens and closes without GNOME's window animations,
+and its text cursor doesn't blink, because the fade redraws the whole popup
+every frame.
 
 The popup renders with GTK's Cairo renderer instead of the GPU. Measured on
 GNOME 50 with 200 items (median of warm launches):

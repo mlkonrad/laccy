@@ -53,6 +53,11 @@ pub struct Popup {
 
 impl Popup {
     pub fn present(app: &adw::Application) {
+        // GTK fades the text cursor in and out by redrawing the whole popup every
+        // frame, about 12% of a core with the Cairo renderer, so it stays solid.
+        if let Some(settings) = gtk::Settings::default() {
+            settings.set_gtk_cursor_blink(false);
+        }
         let history = match History::open_default() {
             Ok(history) => history,
             Err(err) => {
