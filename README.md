@@ -22,6 +22,7 @@ or type keys. Laccy is therefore three small parts:
  GNOME Shell extension (JS, runs inside gnome-shell)
    ├─ clipboard changed ──AddText/AddImage/AddFiles──▶ laccyd (Rust, no UI)
    │                                   └─ SQLite ~/.local/share/laccy/history.db
+   ├─ top bar menu and label ──Clear/Latest──▶ laccyd
    ├─ Shift+Super+C ──launches──▶ laccy popup (Rust, GTK 4 + libadwaita)
    │                                   └─ reads the same database, reloads on laccyd's HistoryChanged
    └─ ◀──SetClipboard/SetContent── laccy, when an item is picked
@@ -61,7 +62,9 @@ images' worth of buffers: 12 MB more private memory after 6 MB screenshots.
 
 **Privacy:** copies marked as secret by password managers
 (`x-kde-passwordManagerHint`) are never recorded, and you can ignore whole
-apps (see [Preferences](#preferences)). Nothing is recorded while the
+apps or copies matching a pattern, like API keys (see [Preferences](#preferences)).
+You can also pause recording, or skip just the next copy, from the
+[top bar icon](#top-bar-icon). Nothing is recorded while the
 screen is locked, because GNOME disables extensions then. History never
 leaves your machine.
 
@@ -107,9 +110,30 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Ctrl+1 … Ctrl+9 | Pick the first nine items |
 | Alt+P | Pin or unpin (pinned items stay at the top) |
 | Alt+Delete | Delete the item |
+| Ctrl+Space | Show or hide the preview |
 | Ctrl+Shift+Delete | Clear unpinned history |
+| Ctrl+Alt+Shift+Delete | Clear all history, including pinned items |
 | Ctrl+, | Open preferences |
 | Esc | Close |
+
+While you search, the matching text is highlighted. The **preview** shows
+the selected item in full next to the list: the whole text, the image at
+full size, or the paths of copied files, with the app it came from, when it
+was first and last copied, and how often. It opens with Ctrl+Space, or by
+itself once the selection rests for 1.5 seconds; after you close it, it
+waits for Ctrl+Space until the popup opens again. The popup widens to the
+right while it's open.
+
+## Top bar icon
+
+| Click | Action |
+|---|---|
+| Click | Open or close Laccy |
+| Alt+click | Pause or resume recording (the icon dims while paused) |
+| Alt+Shift+click | Don't record the next copy |
+| Right-click | Menu: Open Clipboard History, Pause Recording, Ignore Next Copy, Clear History…, Preferences |
+
+**Clear History…** asks whether to clear unpinned items or everything.
 
 ## Preferences
 
@@ -121,9 +145,29 @@ in the top bar, by right-clicking Laccy in the app grid and choosing
 - **Paste Automatically:** also paste after picking an item (off by default).
 - **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).
 - **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
-- **Show Icon in Top Bar:** click the icon to open the history, right-click it for a menu (on by default).
+- **Pause Recording:** copies aren't recorded until you turn it off (off by default).
+
+Appearance:
+
+- **Highlight Matches:** Bold, Italic, Underline or Color (Bold by default).
+- **Show Special Symbols:** show leading and trailing spaces as `·`, line breaks as `⏎` and tabs as `⇥` (on by default).
+- **Show Color Swatches:** items that are only a hex color, like `#3584e4` (`#` and 3, 4, 6 or 8 digits), show a square of that color (on by default).
+- **Show App Icons:** the icon of the app each item was copied from (off by default).
+- **Show Icon in Top Bar:** see [Top bar icon](#top-bar-icon) (on by default).
+- **Show Latest Copy in Top Bar:** the start of the most recently copied unpinned item next to the icon (off by default).
+
+Preview:
+
+- **Open Automatically:** open the preview once the selection rests (on by default).
+- **Delay:** how long it has to rest, in milliseconds (1500 by default).
+
+History:
+
 - **History Size:** unpinned items to keep (200 by default).
+- **Sort By:** Last Copied, First Copied or Number of Copies (Last Copied by default). Pinned items always stay at the top.
+- **Save Text, Save Images, Save Files:** which kinds of copies are recorded (all on by default).
 - **Ignored Apps:** apps whose copies are never recorded.
+- **Ignored Patterns:** regular expressions; text copies, and file copies by their paths, that match one are never recorded. Patterns are case-sensitive unless they start with `(?i)`, so `(?i)^sk-` skips keys starting with `sk-` or `SK-`.
 
 Changes apply immediately. Settings are stored in GSettings with the
 extension's schema, so they also work from the command line:
@@ -138,7 +182,9 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or Paste Automatically) doesn't work there yet.
 - **Images are kept at full size** in the history database, so a long history of screenshots takes disk space.
 - **Picked formatted text** loses its formatting if `laccy` is killed before something else is copied; GNOME then keeps only the plain text.
-- The popup opens where GNOME places new windows (Wayland apps can't choose their own position).
+- The popup opens where GNOME places new windows (Wayland apps can't choose their own position), and the preview widens it to the right.
+- **App icons** come from installed apps' desktop files, so copies from apps without one show no icon.
+- **Highlights** only mark what's visible in a row, so an item can match further along without anything highlighted; the preview shows the rest.
 
 ## Roadmap
 
@@ -149,6 +195,9 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Regex search mode
 - [x] Formatted text (HTML/RTF) and paste without formatting
 - [x] Live refresh while the popup is open
+- [x] Pause recording, ignore next copy, ignored patterns, and choosing which kinds of copies are saved
+- [x] Sort order, preview, highlighted matches, special symbols, color swatches, app icons
+- [x] Clear all history, latest copy in the top bar
 - [ ] App icon, Flatpak/RPM packaging, extensions.gnome.org release
 
 ## License
