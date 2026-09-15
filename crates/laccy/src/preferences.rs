@@ -5,7 +5,8 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
     self, HIGHLIGHT_MATCHES_KEY, HISTORY_SIZE_KEY, Highlight, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY,
-    PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, RECORD_FILES_KEY, RECORD_IMAGES_KEY,
+    PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, PREVIEW_AUTOMATICALLY_KEY, PREVIEW_DELAY_KEY,
+    RECORD_FILES_KEY, RECORD_IMAGES_KEY,
     RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
     SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
 };
@@ -58,6 +59,7 @@ fn preferences_page(settings: &gio::Settings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.add(&general_group(settings));
     page.add(&appearance_group(settings));
+    page.add(&preview_group(settings));
     page.add(&history_group(settings));
     page.add(&ignored_apps_group(settings));
     page.add(&ignored_patterns_group(settings));
@@ -170,6 +172,29 @@ fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         settings.bind(key, &row, "active").build();
         group.add(&row);
     }
+
+    group
+}
+
+fn preview_group(settings: &gio::Settings) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("Preview")
+        .description("Ctrl+Space shows the selected item in full next to the list, with where and when it was copied.")
+        .build();
+
+    let automatic_row = adw::SwitchRow::builder()
+        .title("Open Automatically")
+        .subtitle("Show the preview once the selection rests")
+        .build();
+    settings.bind(PREVIEW_AUTOMATICALLY_KEY, &automatic_row, "active").build();
+    group.add(&automatic_row);
+
+    let delay_row = adw::SpinRow::with_range(200.0, 100_000.0, 100.0);
+    delay_row.set_title("Delay");
+    delay_row.set_subtitle("Milliseconds before the preview opens");
+    settings.bind(PREVIEW_DELAY_KEY, &delay_row, "value").build();
+    automatic_row.bind_property("active", &delay_row, "sensitive").sync_create().build();
+    group.add(&delay_row);
 
     group
 }

@@ -3,6 +3,7 @@
 //! the preferences window applies everywhere right away.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use gio::glib;
 use gio::prelude::*;
@@ -34,6 +35,8 @@ pub const HIGHLIGHT_MATCHES_KEY: &str = "highlight-matches";
 pub const SHOW_SPECIAL_SYMBOLS_KEY: &str = "show-special-symbols";
 pub const SHOW_COLOR_SWATCHES_KEY: &str = "show-color-swatches";
 pub const SHOW_APP_ICONS_KEY: &str = "show-app-icons";
+pub const PREVIEW_AUTOMATICALLY_KEY: &str = "preview-automatically";
+pub const PREVIEW_DELAY_KEY: &str = "preview-delay";
 /// Only read by the extension, which adds or removes its top bar icon.
 pub const SHOW_INDICATOR_KEY: &str = "show-indicator";
 
@@ -100,6 +103,9 @@ pub struct Config {
     pub show_color_swatches: bool,
     /// Show the icon of the app each item was copied from.
     pub show_app_icons: bool,
+    /// Open the preview once the selection rests for `preview_delay`.
+    pub preview_automatically: bool,
+    pub preview_delay: Duration,
 }
 
 /// Used when the schema can't be found. Must match the schema's defaults,
@@ -123,6 +129,8 @@ impl Default for Config {
             show_special_symbols: true,
             show_color_swatches: true,
             show_app_icons: false,
+            preview_automatically: true,
+            preview_delay: Duration::from_millis(1500),
         }
     }
 }
@@ -151,6 +159,8 @@ impl Config {
             show_special_symbols: settings.boolean(SHOW_SPECIAL_SYMBOLS_KEY),
             show_color_swatches: settings.boolean(SHOW_COLOR_SWATCHES_KEY),
             show_app_icons: settings.boolean(SHOW_APP_ICONS_KEY),
+            preview_automatically: settings.boolean(PREVIEW_AUTOMATICALLY_KEY),
+            preview_delay: Duration::from_millis(settings.uint(PREVIEW_DELAY_KEY).into()),
         }
     }
 

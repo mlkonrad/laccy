@@ -100,6 +100,17 @@
       <summary>Show app icons</summary>
       <description>Shows the icon of the app each item was copied from.</description>
     </key>
+    <key name="preview-automatically" type="b">
+      <default>true</default>
+      <summary>Open the preview automatically</summary>
+      <description>Shows the selected item in full next to the list once the selection rests for preview-delay milliseconds. Ctrl+Space always toggles it.</description>
+    </key>
+    <key name="preview-delay" type="u">
+      <range min="200" max="100000"/>
+      <default>1500</default>
+      <summary>Preview delay</summary>
+      <description>Milliseconds the selection has to rest before the preview opens automatically.</description>
+    </key>
     <key name="show-indicator" type="b">
       <default>true</default>
       <summary>Show icon in top bar</summary>

@@ -17,6 +17,10 @@ const PREVIEW_CHARS: usize = 100;
 const NUMBERED_ITEMS: u32 = 9;
 /// Tells the popup apart from the preferences window.
 const WINDOW_NAME: &str = "laccy-popup";
+const POPUP_WIDTH: i32 = 480;
+const POPUP_HEIGHT: i32 = 540;
+/// How much wider the popup gets while the preview is open.
+const PREVIEW_WIDTH: i32 = 400;
 
 /// Opens the popup, or closes it if it's already open.
 pub fn toggle(app: &adw::Application) {
@@ -56,6 +60,13 @@ pub struct Popup {
     /// the popup without it counting as a click elsewhere.
     dialog_open: Cell<bool>,
     closing: Cell<bool>,
+    preview: Preview,
+    /// Opens the preview once the selection rests, see [`Popup::schedule_preview`].
+    preview_timeout: RefCell<Option<glib::SourceId>>,
+    /// Updates the preview once, however many times the selection moved meanwhile.
+    preview_update: RefCell<Option<glib::SourceId>>,
+    /// Set when the preview is closed by hand, so it doesn't open by itself again.
+    preview_dismissed: Cell<bool>,
 }
 
 impl Popup {
@@ -125,17 +136,25 @@ impl Popup {
         let banner = adw::Banner::new("Laccy's GNOME Shell extension isn't running, so picked items can't be copied");
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.set_width_request(POPUP_WIDTH);
+        content.set_hexpand(true);
         content.append(&banner);
         content.append(&search);
         content.append(&stack);
 
+        let preview = Preview::new();
+        let columns = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        columns.append(&content);
+        columns.append(&preview.separator);
+        columns.append(&preview.pane);
+
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("Laccy")
-            .default_width(480)
-            .default_height(540)
+            .default_width(POPUP_WIDTH)
+            .default_height(POPUP_HEIGHT)
             .resizable(false)
-            .content(&content)
+            .content(&columns)
             .build();
         search.set_key_capture_widget(Some(&window));
         window.set_widget_name(WINDOW_NAME);
@@ -159,6 +178,10 @@ impl Popup {
             was_active: Cell::new(false),
             dialog_open: Cell::new(false),
             closing: Cell::new(false),
+            preview,
+            preview_timeout: RefCell::default(),
+            preview_update: RefCell::default(),
+            preview_dismissed: Cell::new(false),
         }
     }
 
@@ -178,6 +201,18 @@ impl Popup {
             #[weak(rename_to = popup)]
             self,
             move |_| popup.apply_filter()
+        ));
+
+        self.selection.connect_selected_notify(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| {
+                if popup.preview.is_open() {
+                    popup.queue_preview_update();
+                } else {
+                    popup.schedule_preview();
+                }
+            }
         ));
 
         self.list.connect_activate(glib::clone!(
@@ -263,6 +298,8 @@ impl Popup {
                 self.confirm_clear(true)
             }
             gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
+            // Maccy's default preview shortcut.
+            gdk::Key::space if mods == Mod::CONTROL_MASK => self.toggle_preview(),
             _ if mods == Mod::CONTROL_MASK => match key.to_unicode().and_then(|c| c.to_digit(10)) {
                 Some(digit @ 1..=NUMBERED_ITEMS) => self.pick(digit - 1, paste, plain),
                 _ => return glib::Propagation::Proceed,
@@ -288,6 +325,8 @@ impl Popup {
         if let Some(position) = position {
             self.select(position);
         }
+        // The item may be the same while its copy count and times changed.
+        self.update_preview();
     }
 
     fn apply_filter(&self) {
@@ -533,9 +572,258 @@ impl Popup {
 
     fn close(&self) {
         if !self.closing.replace(true) {
+            for source in [self.preview_timeout.take(), self.preview_update.take()].into_iter().flatten() {
+                source.remove();
+            }
             self.window.close();
         }
     }
+
+    fn toggle_preview(&self) {
+        let open = !self.preview.is_open();
+        if !open {
+            self.preview_dismissed.set(true);
+        }
+        if let Some(source) = self.preview_timeout.take() {
+            source.remove();
+        }
+        self.set_preview_open(open);
+    }
+
+    /// Shows or hides the preview, growing or shrinking the popup to fit.
+    fn set_preview_open(&self, open: bool) {
+        if self.preview.is_open() == open {
+            return;
+        }
+        self.preview.pane.set_visible(open);
+        self.preview.separator.set_visible(open);
+        let width = if open { POPUP_WIDTH + PREVIEW_WIDTH } else { POPUP_WIDTH };
+        self.window.set_default_size(width, POPUP_HEIGHT);
+        if open {
+            self.update_preview();
+        } else {
+            // Drops the full text or image.
+            self.preview.show(&self.rows, None, None);
+        }
+    }
+
+    /// Opens the preview once the selection has rested for the configured delay.
+    fn schedule_preview(self: &Rc<Self>) {
+        if let Some(source) = self.preview_timeout.take() {
+            source.remove();
+        }
+        if !self.config.preview_automatically || self.preview_dismissed.get() || self.store.n_items() == 0 {
+            return;
+        }
+        let source = glib::timeout_add_local_once(
+            self.config.preview_delay,
+            glib::clone!(
+                #[weak(rename_to = popup)]
+                self,
+                move || {
+                    // It has run, so it must not be removed later.
+                    popup.preview_timeout.take();
+                    popup.set_preview_open(true);
+                }
+            ),
+        );
+        self.preview_timeout.replace(Some(source));
+    }
+
+    fn queue_preview_update(self: &Rc<Self>) {
+        if self.preview_update.borrow().is_some() {
+            return;
+        }
+        let source = glib::idle_add_local_once(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move || {
+                popup.preview_update.take();
+                popup.update_preview();
+            }
+        ));
+        self.preview_update.replace(Some(source));
+    }
+
+    /// Shows the selected item in the preview, if it's open.
+    fn update_preview(&self) {
+        if !self.preview.is_open() {
+            return;
+        }
+        let item = self.item_at(self.selection.selected(), Item::clone);
+        let content = item.as_ref().and_then(|item| {
+            self.history
+                .content(item.id)
+                .inspect_err(|err| eprintln!("laccy: cannot read item: {err}"))
+                .ok()
+                .flatten()
+        });
+        self.preview.show(&self.rows, item.as_ref(), content);
+    }
+}
+
+/// The pane next to the list that shows the selected item in full, like
+/// Maccy's preview. Hidden until Ctrl+Space or the selection rests.
+struct Preview {
+    separator: gtk::Separator,
+    pane: gtk::Box,
+    text: gtk::TextView,
+    text_scroll: gtk::ScrolledWindow,
+    picture: gtk::Picture,
+    app_title: gtk::Label,
+    app: gtk::Box,
+    app_icon: gtk::Image,
+    app_name: gtk::Label,
+    size_title: gtk::Label,
+    size: gtk::Label,
+    first_copied: gtk::Label,
+    last_copied: gtk::Label,
+    copies: gtk::Label,
+}
+
+impl Preview {
+    fn new() -> Self {
+        let text = gtk::TextView::builder()
+            .editable(false)
+            .cursor_visible(false)
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .top_margin(12)
+            .bottom_margin(12)
+            .left_margin(12)
+            .right_margin(12)
+            .build();
+        let text_scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&text)
+            .build();
+        let picture = gtk::Picture::builder()
+            .content_fit(gtk::ContentFit::Contain)
+            .can_shrink(true)
+            .vexpand(true)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+
+        let grid = gtk::Grid::builder()
+            .column_spacing(12)
+            .row_spacing(6)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        let mut next_row = 0;
+        let mut add_row = |title: &str, value: &gtk::Widget| {
+            let title = gtk::Label::builder().label(title).xalign(0.0).build();
+            title.add_css_class("dim-label");
+            grid.attach(&title, 0, next_row, 1, 1);
+            grid.attach(value, 1, next_row, 1, 1);
+            next_row += 1;
+            title
+        };
+        let value_label = || gtk::Label::builder().xalign(0.0).hexpand(true).ellipsize(pango::EllipsizeMode::End).build();
+
+        let app_icon = gtk::Image::new();
+        let app_name = value_label();
+        let app = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        app.append(&app_icon);
+        app.append(&app_name);
+        let app_title = add_row("Application", app.upcast_ref());
+        let size = value_label();
+        let size_title = add_row("Size", size.upcast_ref());
+        let first_copied = value_label();
+        add_row("First Copied", first_copied.upcast_ref());
+        let last_copied = value_label();
+        add_row("Last Copied", last_copied.upcast_ref());
+        let copies = value_label();
+        add_row("Copies", copies.upcast_ref());
+
+        let pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        pane.set_width_request(PREVIEW_WIDTH);
+        pane.set_visible(false);
+        pane.append(&text_scroll);
+        pane.append(&picture);
+        pane.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        pane.append(&grid);
+
+        let separator = gtk::Separator::new(gtk::Orientation::Vertical);
+        separator.set_visible(false);
+
+        Self {
+            separator,
+            pane,
+            text,
+            text_scroll,
+            picture,
+            app_title,
+            app,
+            app_icon,
+            app_name,
+            size_title,
+            size,
+            first_copied,
+            last_copied,
+            copies,
+        }
+    }
+
+    fn is_open(&self) -> bool {
+        self.pane.is_visible()
+    }
+
+    /// Shows `item` with its full `content`, or empties the pane.
+    fn show(&self, rows: &RowState, item: Option<&Item>, content: Option<Content>) {
+        let (text, texture) = match content {
+            Some(Content::Text(text)) => (Some(text), None),
+            Some(Content::Files(uris)) => {
+                (Some(uris.iter().map(|uri| files::display_path(uri)).collect::<Vec<_>>().join("\n")), None)
+            }
+            Some(Content::Image { data, .. }) => (
+                None,
+                gdk::Texture::from_bytes(&glib::Bytes::from_owned(data))
+                    .inspect_err(|err| eprintln!("laccy: cannot load image: {err}"))
+                    .ok(),
+            ),
+            None => (None, None),
+        };
+        self.text_scroll.set_visible(texture.is_none());
+        self.text.buffer().set_text(text.as_deref().unwrap_or(""));
+        self.picture.set_visible(texture.is_some());
+        self.size_title.set_visible(texture.is_some());
+        self.size.set_visible(texture.is_some());
+        if let Some(texture) = &texture {
+            self.size.set_text(&format!("{} × {}", texture.width(), texture.height()));
+        }
+        self.picture.set_paintable(texture.as_ref());
+
+        let source_app = item.and_then(|item| item.source_app.as_deref());
+        let app = source_app.and_then(|app_id| rows.app(app_id));
+        self.app_title.set_visible(source_app.is_some());
+        self.app.set_visible(source_app.is_some());
+        self.app_icon.set_visible(app.is_some());
+        match &app {
+            Some((icon, name)) => {
+                self.app_icon.set_from_gicon(icon);
+                self.app_name.set_text(name);
+            }
+            // Uninstalled since, or without an icon.
+            None => self.app_name.set_text(source_app.unwrap_or("")),
+        }
+        self.first_copied.set_text(&item.map(|item| format_time(item.first_copied)).unwrap_or_default());
+        self.last_copied.set_text(&item.map(|item| format_time(item.last_copied)).unwrap_or_default());
+        self.copies.set_text(&item.map(|item| item.copy_count.to_string()).unwrap_or_default());
+    }
+}
+
+/// A local date and time for `millis` since the Unix epoch, in the locale's format.
+fn format_time(millis: i64) -> String {
+    glib::DateTime::from_unix_local(millis / 1000)
+        .and_then(|time| time.format("%x %X"))
+        .map(|time| time.to_string())
+        .unwrap_or_default()
 }
 
 /// What the search looks through: the text itself, or the paths of copied
