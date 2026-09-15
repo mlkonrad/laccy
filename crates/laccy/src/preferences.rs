@@ -8,7 +8,7 @@ use laccy_core::config::{
     PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, PREVIEW_AUTOMATICALLY_KEY, PREVIEW_DELAY_KEY,
     RECORD_FILES_KEY, RECORD_IMAGES_KEY,
     RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
-    SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
+    SHOW_LATEST_COPY_KEY, SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
 };
 use laccy_core::history::SortOrder;
 use laccy_core::search;
@@ -172,6 +172,14 @@ fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         settings.bind(key, &row, "active").build();
         group.add(&row);
     }
+
+    let latest_row = adw::SwitchRow::builder()
+        .title("Show Latest Copy in Top Bar")
+        .subtitle("Show the start of the most recent unpinned item next to the icon")
+        .build();
+    settings.bind(SHOW_LATEST_COPY_KEY, &latest_row, "active").build();
+    settings.bind(SHOW_INDICATOR_KEY, &latest_row, "sensitive").flags(gio::SettingsBindFlags::GET).build();
+    group.add(&latest_row);
 
     group
 }

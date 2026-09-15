@@ -116,6 +116,11 @@
       <summary>Show icon in top bar</summary>
       <description>Shows a Laccy icon in the top bar. Click it to open the clipboard history; right-click it for more options.</description>
     </key>
+    <key name="show-latest-copy" type="b">
+      <default>false</default>
+      <summary>Show latest copy in top bar</summary>
+      <description>Shows the start of the most recently copied unpinned item next to the top bar icon.</description>
+    </key>
     <key name="max-item-bytes" type="u">
       <default>1048576</default>
       <summary>Largest recorded copy</summary>

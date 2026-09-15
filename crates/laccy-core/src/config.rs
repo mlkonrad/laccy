@@ -39,6 +39,8 @@ pub const PREVIEW_AUTOMATICALLY_KEY: &str = "preview-automatically";
 pub const PREVIEW_DELAY_KEY: &str = "preview-delay";
 /// Only read by the extension, which adds or removes its top bar icon.
 pub const SHOW_INDICATOR_KEY: &str = "show-indicator";
+/// Only read by the extension, which asks laccyd for the label.
+pub const SHOW_LATEST_COPY_KEY: &str = "show-latest-copy";
 
 /// How the popup marks the text a search matched.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

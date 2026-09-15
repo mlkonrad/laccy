@@ -6,6 +6,7 @@ use std::ffi::OsStr;
 use std::rc::Rc;
 
 use gio::glib;
+use gio::prelude::*;
 use laccy_core::config::{self, Config};
 use laccy_core::history::{Content, Format, History};
 use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL};
@@ -33,6 +34,9 @@ const INTROSPECTION: &str = r#"
     </method>
     <method name="Clear">
       <arg name="include_pinned" type="b" direction="in"/>
+    </method>
+    <method name="Latest">
+      <arg name="label" type="s" direction="out"/>
     </method>
     <signal name="HistoryChanged"/>
   </interface>
@@ -92,6 +96,20 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
                     }
                     Err(err) => {
                         eprintln!("laccyd: cannot clear history: {err}");
+                        invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &err.to_string());
+                    }
+                }
+                return;
+            }
+            // The label of the latest copy, shown next to the extension's top bar icon.
+            if method == "Latest" {
+                match history.borrow().latest_unpinned() {
+                    Ok(item) => {
+                        let label = item.as_ref().map(laccy_core::latest_copy_label).unwrap_or_default();
+                        invocation.return_value(Some(&(label,).to_variant()));
+                    }
+                    Err(err) => {
+                        eprintln!("laccyd: cannot read the latest copy: {err}");
                         invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &err.to_string());
                     }
                 }
@@ -240,8 +258,6 @@ fn release_memory(history: &History) {
 
 #[cfg(test)]
 mod tests {
-    use gio::prelude::*;
-
     use super::*;
 
     #[test]

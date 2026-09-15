@@ -81,6 +81,8 @@ const PAUSED_KEY = 'paused';
 const RECORD_TEXT_KEY = 'record-text';
 const RECORD_IMAGES_KEY = 'record-images';
 const RECORD_FILES_KEY = 'record-files';
+const SHOW_LATEST_COPY_KEY = 'show-latest-copy';
+const HISTORY_CHANGED_SIGNAL = 'HistoryChanged';
 const INDICATOR_ICON = 'edit-paste-symbolic';
 // The icon's opacity while recording is paused.
 const PAUSED_OPACITY = 128;
@@ -126,11 +128,15 @@ class LaccyIndicator extends PanelMenu.Button {
         super._init(0.5, 'Laccy');
         this._settings = settings;
 
+        const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         this._icon = new St.Icon({
             icon_name: INDICATOR_ICON,
             style_class: 'system-status-icon',
         });
-        this.add_child(this._icon);
+        box.add_child(this._icon);
+        this._latestCopyLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER, visible: false});
+        box.add_child(this._latestCopyLabel);
+        this.add_child(box);
 
         this.menu.addAction('Open Clipboard History', actions.openHistory);
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -177,6 +183,12 @@ class LaccyIndicator extends PanelMenu.Button {
     setIgnoreNext(pending) {
         this._ignoreNextItem.setOrnament(pending ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.HIDDEN);
     }
+
+    // Shows `label` next to the icon, or nothing when it's empty.
+    setLatestCopy(label) {
+        this._latestCopyLabel.text = label;
+        this._latestCopyLabel.visible = label !== '';
+    }
 });
 
 export default class LaccyExtension extends Extension {
@@ -208,8 +220,11 @@ export default class LaccyExtension extends Extension {
             () => this._togglePopup());
 
         this._indicator = null;
+        this._historyChangedId = 0;
         this._showIndicatorChangedId = this._settings.connect(`changed::${SHOW_INDICATOR_KEY}`,
             () => this._syncIndicator());
+        this._showLatestCopyChangedId = this._settings.connect(`changed::${SHOW_LATEST_COPY_KEY}`,
+            () => this._syncLatestCopy());
         this._syncIndicator();
     }
 
@@ -217,8 +232,10 @@ export default class LaccyExtension extends Extension {
         Main.wm.removeKeybinding(TOGGLE_SHORTCUT_KEY);
 
         this._settings.disconnect(this._showIndicatorChangedId);
+        this._settings.disconnect(this._showLatestCopyChangedId);
         this._indicator?.destroy();
         this._indicator = null;
+        this._syncLatestCopy();
 
         this._dbus.unexport();
         this._dbus = null;
@@ -414,6 +431,8 @@ export default class LaccyExtension extends Extension {
             if (!this._isPopup(window))
                 return;
             window.disconnectObject(this);
+            // Pins, deletes and clears in the popup don't go through laccyd.
+            window.connectObject('unmanaged', () => this._refreshLatestCopy(), this);
             Main.wm.skipNextEffect(actor);
             // Mapping uses up that skip; this one is for closing.
             const firstFrameId = actor.connect('first-frame', () => {
@@ -449,6 +468,42 @@ export default class LaccyExtension extends Extension {
             this._indicator.destroy();
             this._indicator = null;
         }
+        this._syncLatestCopy();
+    }
+
+    // The latest copy's label is only asked for, and laccyd's HistoryChanged only
+    // followed, while the top bar icon shows it.
+    _syncLatestCopy() {
+        const show = this._indicator !== null && this._settings?.get_boolean(SHOW_LATEST_COPY_KEY);
+        if (show && !this._historyChangedId) {
+            this._historyChangedId = Gio.DBus.session.signal_subscribe(
+                DAEMON_BUS_NAME, DAEMON_INTERFACE, HISTORY_CHANGED_SIGNAL, DAEMON_OBJECT_PATH, null,
+                Gio.DBusSignalFlags.NONE, () => this._refreshLatestCopy());
+            this._refreshLatestCopy();
+        } else if (!show && this._historyChangedId) {
+            Gio.DBus.session.signal_unsubscribe(this._historyChangedId);
+            this._historyChangedId = 0;
+            this._indicator?.setLatestCopy('');
+        }
+    }
+
+    _refreshLatestCopy() {
+        if (!this._historyChangedId)
+            return;
+        Gio.DBus.session.call(
+            DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, 'Latest', null,
+            new GLib.VariantType('(s)'), Gio.DBusCallFlags.NONE, -1, null,
+            (connection, result) => {
+                let label = '';
+                try {
+                    [label] = connection.call_finish(result).deepUnpack();
+                } catch (e) {
+                    console.warn(`Laccy: could not read the latest copy: ${e.message}`);
+                }
+                // Turned off, or the extension disabled, meanwhile.
+                if (this._historyChangedId)
+                    this._indicator?.setLatestCopy(label);
+            });
     }
 
     _lookupApp() {
@@ -492,6 +547,8 @@ export default class LaccyExtension extends Extension {
     SetClipboard(text, paste) {
         this._setClipboard(() => this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text));
         this._pasteIfAllowed(paste);
+        // The popup has moved the item to the top already.
+        this._refreshLatestCopy();
     }
 
     // D-Bus method, called by the popup when an image or files are picked.
@@ -499,6 +556,7 @@ export default class LaccyExtension extends Extension {
         this._setClipboard(() =>
             this._clipboard.set_content(St.ClipboardType.CLIPBOARD, mimeType, new GLib.Bytes(data)));
         this._pasteIfAllowed(paste);
+        this._refreshLatestCopy();
     }
 
     // D-Bus method, called by the popup after it put a formatted item on the

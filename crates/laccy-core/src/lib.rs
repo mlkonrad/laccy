@@ -103,6 +103,20 @@ pub fn hex_color(text: &str) -> Option<[u8; 4]> {
     Some([channels[0], channels[1], channels[2], channels.get(3).copied().unwrap_or(255)])
 }
 
+/// Characters of the latest copy shown next to the top bar icon, like Maccy's.
+pub const LATEST_COPY_CHARS: usize = 20;
+
+/// The label of `item` next to the top bar icon: the start of its text, the
+/// names of its files, or "Image".
+pub fn latest_copy_label(item: &history::Item) -> String {
+    let text = match item.kind {
+        history::Kind::Text => item.excerpt.chars().take(100).collect(),
+        history::Kind::Files => item.excerpt.lines().map(files::display_name).collect::<Vec<_>>().join(", "),
+        history::Kind::Image => "Image".to_owned(),
+    };
+    preview(&text, LATEST_COPY_CHARS)
+}
+
 /// Single-line preview of `text`: whitespace runs collapse to one space and the
 /// result is cut to `max_chars` characters, ending in an ellipsis when cut.
 pub fn preview(text: &str, max_chars: usize) -> String {
@@ -124,7 +138,26 @@ pub fn preview(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{display_text, hex_color, preview, thumbnail_size};
+    use super::history::{Item, Kind};
+    use super::{display_text, hex_color, latest_copy_label, preview, thumbnail_size};
+
+    #[test]
+    fn latest_copy_labels_are_short() {
+        let item = |kind, excerpt: &str| Item {
+            id: 1,
+            kind,
+            excerpt: excerpt.to_owned(),
+            source_app: None,
+            pinned: false,
+            first_copied: 0,
+            last_copied: 0,
+            copy_count: 1,
+        };
+        assert_eq!(latest_copy_label(&item(Kind::Text, "  git\n  checkout main  ")), "git checkout main");
+        assert_eq!(latest_copy_label(&item(Kind::Text, "a very long copied sentence")), "a very long copied s…");
+        assert_eq!(latest_copy_label(&item(Kind::Files, "file:///a/report.pdf\nfile:///b/c.png")), "report.pdf, c.png");
+        assert_eq!(latest_copy_label(&item(Kind::Image, "")), "Image");
+    }
 
     #[test]
     fn special_symbols_show_whitespace() {

@@ -268,6 +268,32 @@ impl History {
         .collect()
     }
 
+    /// The most recently copied unpinned item, if there is one.
+    pub fn latest_unpinned(&self) -> Result<Option<Item>> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, substr(text, 1, ?1), source_app, first_copied, last_copied, copy_count
+                 FROM items
+                 WHERE pinned_at IS NULL
+                 ORDER BY last_copied DESC
+                 LIMIT 1",
+                params![EXCERPT_CHARS as i64],
+                |row| {
+                    Ok(Item {
+                        id: row.get(0)?,
+                        kind: Kind::from_i64(row.get(1)?),
+                        excerpt: row.get(2)?,
+                        source_app: row.get(3)?,
+                        pinned: false,
+                        first_copied: row.get(4)?,
+                        last_copied: row.get(5)?,
+                        copy_count: row.get(6)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
     /// The full content of an item, or `None` if it no longer exists.
     pub fn content(&self, id: i64) -> Result<Option<Content>> {
         self.conn
@@ -458,6 +484,17 @@ mod tests {
         let b = &history.items(SortOrder::CopyCount).unwrap()[1];
         assert_eq!(b.copy_count, 3);
         assert!(b.first_copied < b.last_copied);
+    }
+
+    #[test]
+    fn latest_unpinned_skips_pinned_items() {
+        let mut history = History::open_in_memory().unwrap();
+        assert_eq!(history.latest_unpinned().unwrap(), None);
+        history.add(&text("older"), None, 10).unwrap();
+        let newer = history.add(&text("newer"), None, 10).unwrap();
+        assert_eq!(history.latest_unpinned().unwrap().unwrap().id, newer);
+        history.set_pinned(newer, true).unwrap();
+        assert_eq!(history.latest_unpinned().unwrap().unwrap().excerpt, "older");
     }
 
     #[test]
