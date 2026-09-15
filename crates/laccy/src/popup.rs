@@ -48,6 +48,10 @@ pub struct Popup {
     /// Reloads when laccyd stores a copy; unsubscribes when the popup is gone.
     history_changed: RefCell<Option<gio::SignalSubscription>>,
     was_active: Cell<bool>,
+    /// Set while a dialog is open. libadwaita can show a dialog as its own
+    /// window (it does for the non-resizable popup), which takes focus from
+    /// the popup without it counting as a click elsewhere.
+    dialog_open: Cell<bool>,
     closing: Cell<bool>,
 }
 
@@ -142,6 +146,7 @@ impl Popup {
             valid_query: RefCell::default(),
             history_changed: RefCell::default(),
             was_active: Cell::new(false),
+            dialog_open: Cell::new(false),
             closing: Cell::new(false),
         }
     }
@@ -177,7 +182,7 @@ impl Popup {
             move |window| {
                 if window.is_active() {
                     popup.was_active.set(true);
-                } else if popup.was_active.get() && window.visible_dialog().is_none() {
+                } else if popup.was_active.get() && window.visible_dialog().is_none() && !popup.dialog_open.get() {
                     popup.close();
                 }
             }
@@ -473,6 +478,12 @@ impl Popup {
                 }
             ),
         );
+        dialog.connect_closed(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| popup.dialog_open.set(false)
+        ));
+        self.dialog_open.set(true);
         dialog.present(Some(&self.window));
     }
 
