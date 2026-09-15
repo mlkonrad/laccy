@@ -7,7 +7,7 @@ Icon=edit-paste-symbolic
 Terminal=false
 Categories=GTK;Utility;
 Keywords=clipboard;history;copy;paste;
-StartupNotify=true
+StartupNotify=false
 Actions=preferences;
 
 [Desktop Action preferences]

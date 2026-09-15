@@ -74,6 +74,18 @@ const HELD_KEYS_MASK = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MO
 // only within this long after the user opened the popup with the shortcut.
 const PASTE_ALLOWED_US = 2 * 60 * GLib.USEC_PER_SEC;
 
+// A popup closed before GNOME saw it activated leaves a startup notice, and the
+// busy cursor, for 15 seconds. So pressing the shortcut again before the popup
+// shows closes it once it shows, instead of launching laccy again; after this
+// long without a popup, a press launches again.
+const LAUNCH_WAIT_MS = 3000;
+// And closing waits, up to this long, until no startup notice is pending.
+const CLOSE_WAIT_MS = 500;
+const CLOSE_POLL_MS = 20;
+// Pressing it while the popup closes opens it again once it's gone, unless
+// GNOME hasn't closed it after this long.
+const CLOSING_WAIT_US = 2 * GLib.USEC_PER_SEC;
+
 const SHOW_INDICATOR_KEY = 'show-indicator';
 const MAX_ITEM_BYTES_KEY = 'max-item-bytes';
 const MAX_IMAGE_BYTES_KEY = 'max-image-bytes';
@@ -197,6 +209,14 @@ export default class LaccyExtension extends Extension {
         this._pasteAllowedUntil = 0;
         this._pasteTimeoutId = 0;
         this._ignoreNext = false;
+        this._launchTimeoutId = 0;
+        this._closeWhenShown = false;
+        this._closeTimeoutId = 0;
+        // The popup window once GNOME has shown it; closing it before is ignored.
+        this._shownPopup = null;
+        this._closingPopup = null;
+        this._closeRequestedAt = 0;
+        this._openWhenClosed = false;
         this._settingClipboard = false;
         this._restoreIdleId = 0;
 
@@ -252,6 +272,10 @@ export default class LaccyExtension extends Extension {
             GLib.Source.remove(this._pasteTimeoutId);
             this._pasteTimeoutId = 0;
         }
+        this._endLaunch();
+        this._cancelClose();
+        this._shownPopup = null;
+        this._closingPopup = null;
         this._keyboard.run_dispose();
         this._keyboard = null;
         this._settings = null;
@@ -427,12 +451,11 @@ export default class LaccyExtension extends Extension {
         const actor = window.get_compositor_private();
         if (!actor)
             return;
+        let skipped = false;
         const skipIfPopup = () => {
-            if (!this._isPopup(window))
+            if (skipped || !this._isPopup(window))
                 return;
-            window.disconnectObject(this);
-            // Pins, deletes and clears in the popup don't go through laccyd.
-            window.connectObject('unmanaged', () => this._refreshLatestCopy(), this);
+            skipped = true;
             Main.wm.skipNextEffect(actor);
             // Mapping uses up that skip; this one is for closing.
             const firstFrameId = actor.connect('first-frame', () => {
@@ -443,9 +466,76 @@ export default class LaccyExtension extends Extension {
         window.connectObject(
             'notify::title', skipIfPopup,
             'notify::wm-class', skipIfPopup,
-            'shown', () => window.disconnectObject(this),
+            'shown', () => {
+                window.disconnectObject(this);
+                if (window.get_wm_class() !== APP_ID)
+                    return;
+                if (this._isPopup(window)) {
+                    const closeNow = this._closeWhenShown;
+                    this._endLaunch();
+                    this._shownPopup = window;
+                    window.connectObject('unmanaged', () => {
+                        if (this._shownPopup === window)
+                            this._shownPopup = null;
+                        this._cancelClose();
+                        // Pins, deletes and clears in the popup don't go through laccyd.
+                        this._refreshLatestCopy();
+                        if (this._closingPopup === window) {
+                            this._closingPopup = null;
+                            if (this._openWhenClosed) {
+                                this._openWhenClosed = false;
+                                this._togglePopup();
+                            }
+                        }
+                    }, this);
+                    if (closeNow) {
+                        this._closePopup(window);
+                        return;
+                    }
+                }
+                // Without startup notification (see _togglePopup), GNOME may
+                // not focus a new window, so focus Laccy's windows here.
+                window.activate(global.get_current_time());
+            },
             this);
         skipIfPopup();
+    }
+
+    // Forgets a launch once its popup shows, or after LAUNCH_WAIT_MS.
+    _endLaunch() {
+        if (this._launchTimeoutId) {
+            GLib.Source.remove(this._launchTimeoutId);
+            this._launchTimeoutId = 0;
+        }
+        this._closeWhenShown = false;
+    }
+
+    // Asks the popup's window to close, like Esc, once GNOME has no startup
+    // notice pending (see CLOSE_WAIT_MS).
+    _closePopup(window) {
+        this._cancelClose();
+        this._closingPopup = window;
+        this._closeRequestedAt = GLib.get_monotonic_time();
+        this._openWhenClosed = false;
+        const tracker = Shell.WindowTracker.get_default();
+        const start = GLib.get_monotonic_time();
+        const close = () => {
+            const waited = GLib.get_monotonic_time() - start;
+            if (tracker.get_startup_sequences().length > 0 && waited < CLOSE_WAIT_MS * 1000)
+                return GLib.SOURCE_CONTINUE;
+            this._closeTimeoutId = 0;
+            window.delete(global.get_current_time());
+            return GLib.SOURCE_REMOVE;
+        };
+        if (close() === GLib.SOURCE_CONTINUE)
+            this._closeTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CLOSE_POLL_MS, close);
+    }
+
+    _cancelClose() {
+        if (this._closeTimeoutId) {
+            GLib.Source.remove(this._closeTimeoutId);
+            this._closeTimeoutId = 0;
+        }
     }
 
     _isPopup(window) {
@@ -528,14 +618,38 @@ export default class LaccyExtension extends Extension {
     }
 
     _togglePopup() {
+        if (this._closingPopup && GLib.get_monotonic_time() - this._closeRequestedAt < CLOSING_WAIT_US) {
+            this._openWhenClosed = !this._openWhenClosed;
+            return;
+        }
+        this._closingPopup = null;
+        // Closing needs no new laccy process: ask the popup's window to close, like Esc.
+        if (this._shownPopup) {
+            this._closePopup(this._shownPopup);
+            return;
+        }
+        // Pressed again while the popup is on its way: see LAUNCH_WAIT_MS.
+        const popupComing = global.get_window_actors().some(actor => this._isPopup(actor.meta_window));
+        if (this._launchTimeoutId || popupComing) {
+            this._closeWhenShown = !this._closeWhenShown;
+            return;
+        }
+
         const app = this._lookupApp();
         if (!app)
             return;
+        this._launchTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, LAUNCH_WAIT_MS, () => {
+            this._launchTimeoutId = 0;
+            this._closeWhenShown = false;
+            return GLib.SOURCE_REMOVE;
+        });
 
         this._pasteAllowedUntil = GLib.get_monotonic_time() + PASTE_ALLOWED_US;
         // Launch instead of activating: activating a running app only raises
-        // its window (such as the preferences). The running laccy decides
-        // whether to open or close the popup.
+        // its window (such as the preferences). A running laccy (holding picked
+        // formatted text) opens the popup itself. The desktop file turns off
+        // startup notification, whose busy cursor lingered for over a second
+        // after every launch.
         try {
             app.launch(0, -1, Shell.AppLaunchGpu.APP_PREF);
         } catch (e) {
