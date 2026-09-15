@@ -64,6 +64,16 @@
       <summary>Search mode</summary>
       <description>How the popup matches what you type. "exact" matches each word as written; "fuzzy" also matches its letters in order with gaps, so "gco" finds "git checkout"; "regex" matches a regular expression, ignoring case.</description>
     </key>
+    <key name="sort-by" type="s">
+      <choices>
+        <choice value="last-copied"/>
+        <choice value="first-copied"/>
+        <choice value="copy-count"/>
+      </choices>
+      <default>'last-copied'</default>
+      <summary>Sort by</summary>
+      <description>The order of unpinned items: most recently copied first, most recently first copied first, or most copied first. Pinned items always stay at the top.</description>
+    </key>
     <key name="show-indicator" type="b">
       <default>true</default>
       <summary>Show icon in top bar</summary>

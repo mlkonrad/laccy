@@ -265,7 +265,7 @@ impl Popup {
     /// listed, so a copy arriving meanwhile doesn't change what Enter picks.
     fn reload(&self) {
         let selected = self.item_at(self.selection.selected(), |item| item.id);
-        let items = self.history.items().unwrap_or_else(|err| {
+        let items = self.history.items(self.config.sort_by).unwrap_or_else(|err| {
             eprintln!("laccy: cannot read history: {err}");
             Vec::new()
         });

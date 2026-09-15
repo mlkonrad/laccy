@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use gio::glib;
 use gio::prelude::*;
 
-use crate::history::{Content, Format};
+use crate::history::{Content, Format, SortOrder};
 use crate::{FORMAT_MIME_TYPES, files, search};
 
 pub const SCHEMA_ID: &str = "org.gnome.shell.extensions.laccy";
@@ -29,6 +29,7 @@ pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
 /// Also read by the extension, so it doesn't send the daemon images it would drop.
 pub const MAX_IMAGE_BYTES_KEY: &str = "max-image-bytes";
 pub const SEARCH_MODE_KEY: &str = "search-mode";
+pub const SORT_BY_KEY: &str = "sort-by";
 /// Only read by the extension, which adds or removes its top bar icon.
 pub const SHOW_INDICATOR_KEY: &str = "show-indicator";
 
@@ -56,6 +57,8 @@ pub struct Config {
     pub max_image_bytes: usize,
     /// How the popup matches the search query.
     pub search_mode: search::Mode,
+    /// The order of unpinned items.
+    pub sort_by: SortOrder,
 }
 
 /// Used when the schema can't be found. Must match the schema's defaults,
@@ -74,6 +77,7 @@ impl Default for Config {
             max_item_bytes: 1024 * 1024,
             max_image_bytes: 10 * 1024 * 1024,
             search_mode: search::Mode::Exact,
+            sort_by: SortOrder::LastCopied,
         }
     }
 }
@@ -97,6 +101,7 @@ impl Config {
             max_item_bytes: settings.uint(MAX_ITEM_BYTES_KEY) as usize,
             max_image_bytes: settings.uint(MAX_IMAGE_BYTES_KEY) as usize,
             search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
+            sort_by: SortOrder::from_name(&settings.string(SORT_BY_KEY)).unwrap_or_default(),
         }
     }
 
@@ -364,6 +369,15 @@ mod tests {
         for mode in search::Mode::ALL {
             settings.set_string(SEARCH_MODE_KEY, mode.name()).unwrap();
             assert_eq!(Config::from_settings(&settings).search_mode, mode);
+        }
+    }
+
+    #[test]
+    fn schema_lists_every_sort_order() {
+        let settings = test_settings();
+        for order in SortOrder::ALL {
+            settings.set_string(SORT_BY_KEY, order.name()).unwrap();
+            assert_eq!(Config::from_settings(&settings).sort_by, order);
         }
     }
 }

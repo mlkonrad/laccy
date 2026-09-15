@@ -6,8 +6,9 @@ use gtk::{gdk, gio, glib};
 use laccy_core::config::{
     self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY, PASTE_AUTOMATICALLY_KEY,
     PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, RECORD_FILES_KEY, RECORD_IMAGES_KEY, RECORD_TEXT_KEY, SEARCH_MODE_KEY,
-    SHOW_INDICATOR_KEY, TOGGLE_SHORTCUT_KEY,
+    SHOW_INDICATOR_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
 };
+use laccy_core::history::SortOrder;
 use laccy_core::search;
 
 const WINDOW_NAME: &str = "laccy-preferences";
@@ -109,34 +110,23 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     settings.bind(PASTE_WITHOUT_FORMATTING_KEY, &formatting_row, "active").build();
     group.add(&formatting_row);
 
-    let mode_labels: Vec<&str> = search::Mode::ALL
-        .iter()
-        .map(|mode| match mode {
-            search::Mode::Exact => "Exact",
-            search::Mode::Fuzzy => "Fuzzy",
-            search::Mode::Regex => "Regular Expression",
-        })
-        .collect();
-    let search_row = adw::ComboRow::builder()
-        .title("Search Mode")
-        .subtitle(
-            "Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”. \
-             Regular Expression matches a pattern, like “^https?://”",
-        )
-        .model(&gtk::StringList::new(&mode_labels))
-        .build();
-    settings
-        .bind(SEARCH_MODE_KEY, &search_row, "selected")
-        .mapping(|variant, _| {
-            let mode = search::Mode::from_name(variant.str()?)?;
-            let position = search::Mode::ALL.iter().position(|&other| other == mode)?;
-            Some((position as u32).to_value())
-        })
-        .set_mapping(|value, _| {
-            let mode = search::Mode::ALL.get(value.get::<u32>().ok()? as usize)?;
-            Some(mode.name().to_variant())
-        })
-        .build();
+    let search_row = choice_row(
+        settings,
+        SEARCH_MODE_KEY,
+        search::Mode::ALL.map(|mode| {
+            let label = match mode {
+                search::Mode::Exact => "Exact",
+                search::Mode::Fuzzy => "Fuzzy",
+                search::Mode::Regex => "Regular Expression",
+            };
+            (mode.name(), label)
+        }),
+    );
+    search_row.set_title("Search Mode");
+    search_row.set_subtitle(
+        "Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”. \
+         Regular Expression matches a pattern, like “^https?://”",
+    );
     group.add(&search_row);
 
     let indicator_row = adw::SwitchRow::builder()
@@ -164,6 +154,22 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     size_row.set_subtitle("Unpinned items to keep. Pinned items are always kept");
     settings.bind(HISTORY_SIZE_KEY, &size_row, "value").build();
     group.add(&size_row);
+
+    let sort_row = choice_row(
+        settings,
+        SORT_BY_KEY,
+        SortOrder::ALL.map(|order| {
+            let label = match order {
+                SortOrder::LastCopied => "Last Copied",
+                SortOrder::FirstCopied => "First Copied",
+                SortOrder::CopyCount => "Number of Copies",
+            };
+            (order.name(), label)
+        }),
+    );
+    sort_row.set_title("Sort By");
+    sort_row.set_subtitle("Pinned items always stay at the top");
+    group.add(&sort_row);
 
     for (key, title) in [(RECORD_TEXT_KEY, "Save Text"), (RECORD_IMAGES_KEY, "Save Images"), (RECORD_FILES_KEY, "Save Files")] {
         let row = adw::SwitchRow::builder().title(title).build();
@@ -578,6 +584,28 @@ fn app_icon(icon: Option<gio::Icon>) -> gtk::Image {
     };
     image.set_icon_size(gtk::IconSize::Large);
     image
+}
+
+/// A combo row for a string setting whose values are the names in `choices`,
+/// listed by their labels.
+fn choice_row<const N: usize>(
+    settings: &gio::Settings,
+    key: &str,
+    choices: [(&'static str, &'static str); N],
+) -> adw::ComboRow {
+    let labels: Vec<&str> = choices.iter().map(|(_, label)| *label).collect();
+    let row = adw::ComboRow::builder().model(&gtk::StringList::new(&labels)).build();
+    let names: Vec<&'static str> = choices.iter().map(|(name, _)| *name).collect();
+    let set_names = names.clone();
+    settings
+        .bind(key, &row, "selected")
+        .mapping(move |variant, _| {
+            let position = names.iter().position(|name| Some(*name) == variant.str())?;
+            Some((position as u32).to_value())
+        })
+        .set_mapping(move |value, _| Some(set_names.get(value.get::<u32>().ok()? as usize)?.to_variant()))
+        .build();
+    row
 }
 
 fn strings(settings: &gio::Settings, key: &str) -> Vec<String> {

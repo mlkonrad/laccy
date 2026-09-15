@@ -39,6 +39,44 @@ impl Kind {
     }
 }
 
+/// The order of unpinned items. Pinned items always come first, in the order they were pinned.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortOrder {
+    /// Most recently copied first.
+    #[default]
+    LastCopied,
+    /// Most recently copied for the first time first.
+    FirstCopied,
+    /// Most copied first; ties go to the most recently copied.
+    CopyCount,
+}
+
+impl SortOrder {
+    /// Every order, in the order the preferences window lists them.
+    pub const ALL: [Self; 3] = [Self::LastCopied, Self::FirstCopied, Self::CopyCount];
+
+    /// The order's value in GSettings.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::LastCopied => "last-copied",
+            Self::FirstCopied => "first-copied",
+            Self::CopyCount => "copy-count",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|order| order.name() == name)
+    }
+
+    fn order_by(self) -> &'static str {
+        match self {
+            Self::LastCopied => "last_copied DESC",
+            Self::FirstCopied => "first_copied DESC, last_copied DESC",
+            Self::CopyCount => "copy_count DESC, last_copied DESC",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub id: i64,
@@ -48,6 +86,11 @@ pub struct Item {
     pub excerpt: String,
     pub source_app: Option<String>,
     pub pinned: bool,
+    /// When it was first and last copied, in milliseconds since the Unix epoch.
+    pub first_copied: i64,
+    pub last_copied: i64,
+    /// How many times it was copied or picked.
+    pub copy_count: i64,
 }
 
 /// A formatted version of a text item, like its HTML.
@@ -202,13 +245,14 @@ impl History {
     }
 
     /// All items: pinned ones first in the order they were pinned, then the
-    /// rest from most to least recently copied.
-    pub fn items(&self) -> Result<Vec<Item>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, kind, substr(text, 1, ?1), source_app, pinned_at IS NOT NULL
+    /// rest in `order`.
+    pub fn items(&self, order: SortOrder) -> Result<Vec<Item>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, kind, substr(text, 1, ?1), source_app, pinned_at IS NOT NULL, first_copied, last_copied, copy_count
              FROM items
-             ORDER BY pinned_at IS NULL, pinned_at, last_copied DESC",
-        )?;
+             ORDER BY pinned_at IS NULL, pinned_at, {}",
+            order.order_by()
+        ))?;
         stmt.query_map(params![EXCERPT_CHARS as i64], |row| {
             Ok(Item {
                 id: row.get(0)?,
@@ -216,6 +260,9 @@ impl History {
                 excerpt: row.get(2)?,
                 source_app: row.get(3)?,
                 pinned: row.get(4)?,
+                first_copied: row.get(5)?,
+                last_copied: row.get(6)?,
+                copy_count: row.get(7)?,
             })
         })?
         .collect()
@@ -348,7 +395,7 @@ mod tests {
     }
 
     fn texts(history: &History) -> Vec<String> {
-        history.items().unwrap().into_iter().map(|item| item.excerpt).collect()
+        history.items(SortOrder::LastCopied).unwrap().into_iter().map(|item| item.excerpt).collect()
     }
 
     #[test]
@@ -388,7 +435,37 @@ mod tests {
         history.add(&text("two"), None, 10).unwrap();
         history.add(&text("one"), None, 10).unwrap();
         assert_eq!(texts(&history), ["one", "two"]);
-        assert_eq!(history.items().unwrap()[0].source_app.as_deref(), Some("a.desktop"));
+        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].source_app.as_deref(), Some("a.desktop"));
+    }
+
+    #[test]
+    fn sort_orders_keep_pinned_items_first() {
+        let mut history = History::open_in_memory().unwrap();
+        for item in ["a", "b", "c", "b", "b", "c", "a"] {
+            history.add(&text(item), None, 10).unwrap();
+        }
+        let pinned = history.add(&text("pinned"), None, 10).unwrap();
+        history.set_pinned(pinned, true).unwrap();
+
+        let sorted = |order| -> Vec<String> {
+            history.items(order).unwrap().into_iter().map(|item| item.excerpt).collect()
+        };
+        assert_eq!(sorted(SortOrder::LastCopied), ["pinned", "a", "c", "b"]);
+        assert_eq!(sorted(SortOrder::FirstCopied), ["pinned", "c", "b", "a"]);
+        // b was copied 3 times; a and c twice, and a more recently.
+        assert_eq!(sorted(SortOrder::CopyCount), ["pinned", "b", "a", "c"]);
+
+        let b = &history.items(SortOrder::CopyCount).unwrap()[1];
+        assert_eq!(b.copy_count, 3);
+        assert!(b.first_copied < b.last_copied);
+    }
+
+    #[test]
+    fn sort_order_names_round_trip() {
+        for order in SortOrder::ALL {
+            assert_eq!(SortOrder::from_name(order.name()), Some(order));
+        }
+        assert_eq!(SortOrder::from_name("random"), None);
     }
 
     #[test]
@@ -422,7 +499,7 @@ mod tests {
         let mut history = History::open_in_memory().unwrap();
         let long = "é".repeat(EXCERPT_CHARS + 5);
         let id = history.add(&text(&long), None, 10).unwrap();
-        assert_eq!(history.items().unwrap()[0].excerpt.chars().count(), EXCERPT_CHARS);
+        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].excerpt.chars().count(), EXCERPT_CHARS);
         assert_eq!(history.content(id).unwrap(), Some(text(&long)));
     }
 
@@ -433,7 +510,7 @@ mod tests {
         let files_id = history.add(&files, None, 10).unwrap();
         let image_id = history.add(&image(b"\x89PNG pixels"), None, 10).unwrap();
 
-        let items = history.items().unwrap();
+        let items = history.items(SortOrder::LastCopied).unwrap();
         assert_eq!((items[0].kind, items[0].excerpt.as_str()), (Kind::Image, ""));
         assert_eq!((items[1].kind, items[1].excerpt.as_str()), (Kind::Files, "file:///a%20b\nfile:///c"));
         assert_eq!(history.content(files_id).unwrap(), Some(files));
@@ -452,8 +529,8 @@ mod tests {
         history.add(&text("file:///a"), None, 10).unwrap();
         history.add(&Content::Files(vec!["file:///a".to_owned()]), None, 10).unwrap();
         assert_eq!(history.add(&image(b"a"), None, 10).unwrap(), a);
-        assert_eq!(history.items().unwrap().len(), 4);
-        assert_eq!(history.items().unwrap()[0].id, a);
+        assert_eq!(history.items(SortOrder::LastCopied).unwrap().len(), 4);
+        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].id, a);
     }
 
     #[test]
@@ -463,7 +540,7 @@ mod tests {
         history.add(&text("second"), None, 10).unwrap();
         history.touch(first).unwrap();
         assert_eq!(texts(&history), ["first", "second"]);
-        assert_eq!(history.items().unwrap()[0].source_app.as_deref(), Some("a.desktop"));
+        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].source_app.as_deref(), Some("a.desktop"));
     }
 
     #[test]
@@ -510,7 +587,7 @@ mod tests {
             .unwrap();
         }
         let mut history = History::open(&path).unwrap();
-        let items = history.items().unwrap();
+        let items = history.items(SortOrder::LastCopied).unwrap();
         assert_eq!((items[0].kind, items[0].excerpt.as_str()), (Kind::Text, "old"));
         // The old row's hash still finds it.
         assert_eq!(history.add(&text("old"), None, 10).unwrap(), items[0].id);
