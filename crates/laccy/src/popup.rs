@@ -1,9 +1,11 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib, pango};
-use laccy_core::config::Config;
+use laccy_core::config::{Config, Highlight};
 use laccy_core::history::{Content, Format, History, Item, Kind};
 use laccy_core::{
     DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, PICKED_MIME_TYPE, SHELL_BUS_NAME,
@@ -37,6 +39,7 @@ pub struct Popup {
     selection: gtk::SingleSelection,
     /// Shared with the rows, which load image thumbnails as they're shown.
     history: Rc<History>,
+    rows: Rc<RowState>,
     config: Config,
     /// Every history item, in history order.
     objects: RefCell<Vec<glib::BoxedAnyObject>>,
@@ -83,7 +86,14 @@ impl Popup {
     fn build(app: &adw::Application, history: Rc<History>, config: Config) -> Self {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::SingleSelection::new(Some(store.clone()));
-        let list = gtk::ListView::new(Some(selection.clone()), Some(row_factory(Rc::clone(&history))));
+        let rows = Rc::new(RowState {
+            history: Rc::clone(&history),
+            config: config.clone(),
+            query: RefCell::default(),
+            apps: OnceCell::new(),
+            list_items: RefCell::default(),
+        });
+        let list = gtk::ListView::new(Some(selection.clone()), Some(row_factory(Rc::clone(&rows))));
         list.set_single_click_activate(true);
         list.add_css_class("navigation-sidebar");
 
@@ -140,6 +150,7 @@ impl Popup {
             store,
             selection,
             history,
+            rows,
             config,
             objects: RefCell::default(),
             haystacks: RefCell::default(),
@@ -302,7 +313,10 @@ impl Popup {
             .into_iter()
             .map(|index| objects[index].clone())
             .collect();
+        // Rows bound by the splice highlight this query; rows GTK keeps bound are updated after.
+        self.rows.query.replace(self.valid_query.borrow().clone());
         self.store.splice(0, self.store.n_items(), &matches);
+        self.rows.refresh_highlights();
 
         if objects.is_empty() {
             self.empty.set_title("No Clipboard History");
@@ -590,13 +604,103 @@ fn files_icon(uris: &[&str]) -> gio::Icon {
     }
 }
 
-fn row_factory(history: Rc<History>) -> gtk::SignalListItemFactory {
+/// What rows show besides their item. Shared by the popup and its row factory.
+struct RowState {
+    history: Rc<History>,
+    config: Config,
+    /// The last valid query, whose matches rows highlight.
+    query: RefCell<String>,
+    /// Installed apps' icons and names by desktop ID, read when the first row needs one.
+    apps: OnceCell<HashMap<String, (gio::Icon, String)>>,
+    /// Every row's list item. GTK can keep rows bound when the search changes,
+    /// so they're highlighted again through these.
+    list_items: RefCell<Vec<glib::WeakRef<gtk::ListItem>>>,
+}
+
+impl RowState {
+    /// The icon and name of the app with the desktop ID `app_id`, if it's installed and has an icon.
+    fn app(&self, app_id: &str) -> Option<(gio::Icon, String)> {
+        self.apps
+            .get_or_init(|| {
+                gio::AppInfo::all()
+                    .into_iter()
+                    .filter_map(|info| Some((info.id()?.to_string(), (info.icon()?, info.display_name().to_string()))))
+                    .collect()
+            })
+            .get(app_id)
+            .cloned()
+    }
+
+    /// Marks what the query matches in a row's label.
+    fn highlight(&self, label: &gtk::Label) {
+        let ranges = search::highlights(&label.text(), &self.query.borrow(), self.config.search_mode);
+        label.set_attributes(highlight_attributes(&ranges, self.config.highlight_matches).as_ref());
+    }
+
+    fn refresh_highlights(&self) {
+        self.list_items.borrow_mut().retain(|list_item| {
+            let Some(list_item) = list_item.upgrade() else {
+                return false;
+            };
+            if let (Some(_), Some(row)) = (list_item.item(), list_item.child()) {
+                self.highlight(&named_child(&row, "text"));
+            }
+            true
+        });
+    }
+}
+
+/// Pango attributes that mark `ranges` (byte ranges of a label's text) in `style`.
+fn highlight_attributes(ranges: &[Range<usize>], style: Highlight) -> Option<pango::AttrList> {
+    if ranges.is_empty() {
+        return None;
+    }
+    let attributes = pango::AttrList::new();
+    for range in ranges {
+        let marks: Vec<pango::Attribute> = match style {
+            Highlight::Bold => vec![pango::AttrInt::new_weight(pango::Weight::Bold).into()],
+            Highlight::Italic => vec![pango::AttrInt::new_style(pango::Style::Italic).into()],
+            Highlight::Underline => vec![pango::AttrInt::new_underline(pango::Underline::Single).into()],
+            // GNOME's yellow, see-through so the text stays readable in dark mode.
+            Highlight::Color => vec![
+                pango::AttrColor::new_background(0xf6f6, 0xd3d3, 0x2d2d).into(),
+                pango::AttrInt::new_background_alpha(u16::MAX / 2).into(),
+            ],
+        };
+        for mut mark in marks {
+            mark.set_start_index(range.start as u32);
+            mark.set_end_index(range.end as u32);
+            attributes.insert(mark);
+        }
+    }
+    Some(attributes)
+}
+
+/// The child of a row set up by [`row_factory`] with the widget name `name`.
+fn named_child<T: IsA<gtk::Widget>>(row: &gtk::Widget, name: &str) -> T {
+    let mut child = row.first_child();
+    while let Some(widget) = child {
+        if widget.widget_name() == name {
+            return widget.downcast().expect("row child has the expected type");
+        }
+        child = widget.next_sibling();
+    }
+    panic!("row has no {name}");
+}
+
+fn row_factory(state: Rc<RowState>) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
 
-    factory.connect_setup(|_, list_item| {
+    let setup_state = Rc::clone(&state);
+    factory.connect_setup(move |_, list_item| {
         let list_item = list_item.downcast_ref::<gtk::ListItem>().expect("factory creates list items");
+        setup_state.list_items.borrow_mut().push(list_item.downgrade());
         let pin = gtk::Image::from_icon_name("view-pin-symbolic");
+        pin.set_widget_name("pin");
+        let app_icon = gtk::Image::new();
+        app_icon.set_widget_name("app-icon");
         let icon = gtk::Image::new();
+        icon.set_widget_name("kind-icon");
         let picture = gtk::Picture::builder()
             .can_shrink(true)
             .content_fit(gtk::ContentFit::ScaleDown)
@@ -608,25 +712,31 @@ fn row_factory(history: Rc<History>) -> gtk::SignalListItemFactory {
             .child(&picture)
             .tightening_threshold(0)
             .halign(gtk::Align::Start)
+            .name("thumbnail")
+            .build();
+        let swatch = gtk::DrawingArea::builder()
+            .content_width(14)
+            .content_height(14)
+            .valign(gtk::Align::Center)
+            .name("swatch")
             .build();
         let label = gtk::Label::builder()
             .xalign(0.0)
             .hexpand(true)
             .single_line_mode(true)
             .ellipsize(pango::EllipsizeMode::End)
+            .name("text")
             .build();
-        let shortcut = gtk::Label::new(None);
+        let shortcut = gtk::Label::builder().name("shortcut").build();
         shortcut.add_css_class("dim-label");
         shortcut.add_css_class("numeric");
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row.set_margin_top(2);
         row.set_margin_bottom(2);
-        row.append(&pin);
-        row.append(&icon);
-        row.append(&thumbnail);
-        row.append(&label);
-        row.append(&shortcut);
+        for child in [pin.upcast_ref::<gtk::Widget>(), app_icon.upcast_ref(), icon.upcast_ref(), thumbnail.upcast_ref(), swatch.upcast_ref(), label.upcast_ref(), shortcut.upcast_ref()] {
+            row.append(child);
+        }
         list_item.set_child(Some(&row));
 
         // Items can move without being rebound, so follow the position itself.
@@ -644,17 +754,30 @@ fn row_factory(history: Rc<History>) -> gtk::SignalListItemFactory {
         let object = list_item.item().and_downcast::<glib::BoxedAnyObject>().expect("store holds items");
         let item = object.borrow::<Item>();
         let row = list_item.child().expect("row was set up");
-        let pin = row.first_child().expect("row has a pin icon");
-        let icon = pin.next_sibling().and_downcast::<gtk::Image>().expect("row has a kind icon");
-        let thumbnail = icon.next_sibling().and_downcast::<adw::Clamp>().expect("row has a thumbnail");
+        let pin: gtk::Image = named_child(&row, "pin");
+        let app_icon: gtk::Image = named_child(&row, "app-icon");
+        let icon: gtk::Image = named_child(&row, "kind-icon");
+        let thumbnail: adw::Clamp = named_child(&row, "thumbnail");
         let picture = thumbnail.child().and_downcast::<gtk::Picture>().expect("thumbnail has a picture");
-        let label = thumbnail.next_sibling().and_downcast::<gtk::Label>().expect("row has a label");
-        let shortcut = label.next_sibling().and_downcast::<gtk::Label>().expect("row has a shortcut label");
+        let swatch: gtk::DrawingArea = named_child(&row, "swatch");
+        let label: gtk::Label = named_child(&row, "text");
+        let shortcut: gtk::Label = named_child(&row, "shortcut");
 
         pin.set_visible(item.pinned);
 
+        let app = item
+            .source_app
+            .as_deref()
+            .filter(|_| state.config.show_app_icons)
+            .and_then(|app_id| state.app(app_id));
+        app_icon.set_visible(app.is_some());
+        if let Some((app_gicon, name)) = &app {
+            app_icon.set_from_gicon(app_gicon);
+            app_icon.set_tooltip_text(Some(name));
+        }
+
         // Loaded per row, so only the thumbnails on screen are ever decoded.
-        let texture = (item.kind == Kind::Image).then(|| thumbnail_texture(&history, item.id)).flatten();
+        let texture = (item.kind == Kind::Image).then(|| thumbnail_texture(&state.history, item.id)).flatten();
         if let Some(texture) = &texture {
             let (width, height) = (texture.width() / THUMBNAIL_SCALE, texture.height() / THUMBNAIL_SCALE);
             picture.set_size_request(width.max(1), height.max(1));
@@ -664,7 +787,9 @@ fn row_factory(history: Rc<History>) -> gtk::SignalListItemFactory {
         thumbnail.set_visible(texture.is_some());
 
         let (kind_icon, text) = match item.kind {
-            Kind::Text => (None, laccy_core::preview(&item.excerpt, PREVIEW_CHARS)),
+            Kind::Text => {
+                (None, laccy_core::display_text(&item.excerpt, PREVIEW_CHARS, state.config.show_special_symbols))
+            }
             Kind::Files => {
                 let uris: Vec<&str> = item.excerpt.lines().collect();
                 let names: Vec<String> = uris.iter().map(|uri| files::display_name(uri)).collect();
@@ -678,7 +803,25 @@ fn row_factory(history: Rc<History>) -> gtk::SignalListItemFactory {
         if let Some(kind_icon) = &kind_icon {
             icon.set_from_gicon(kind_icon);
         }
+        let color = (state.config.show_color_swatches && item.kind == Kind::Text)
+            .then(|| laccy_core::hex_color(&item.excerpt))
+            .flatten();
+        swatch.set_visible(color.is_some());
+        if let Some([red, green, blue, alpha]) = color {
+            swatch.set_draw_func(move |_, cr, width, height| {
+                let channel = |value: u8| f64::from(value) / 255.0;
+                cr.rectangle(0.5, 0.5, f64::from(width) - 1.0, f64::from(height) - 1.0);
+                cr.set_source_rgba(channel(red), channel(green), channel(blue), channel(alpha));
+                let _ = cr.fill_preserve();
+                // An outline, so white shows on a light row and black on a dark one.
+                cr.set_source_rgba(0.5, 0.5, 0.5, 0.5);
+                cr.set_line_width(1.0);
+                let _ = cr.stroke();
+            });
+        }
+
         label.set_text(&text);
+        state.highlight(&label);
         shortcut.set_text(&match list_item.position() {
             p if p < NUMBERED_ITEMS => format!("Ctrl+{}", p + 1),
             _ => String::new(),

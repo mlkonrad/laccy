@@ -58,6 +58,51 @@ pub(crate) fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
     }
 }
 
+/// A single line of `text` for a popup row, cut to `max_chars` characters.
+/// Without `special_symbols` it's the [`preview`]. With them, whitespace shows
+/// like in Maccy: leading and trailing spaces as `·`, line breaks as `⏎` and
+/// tabs as `⇥`.
+pub fn display_text(text: &str, max_chars: usize, special_symbols: bool) -> String {
+    if !special_symbols {
+        return preview(text, max_chars);
+    }
+    let body = text.trim_matches(' ');
+    let leading = text.len() - text.trim_start_matches(' ').len();
+    // Text of only spaces is all leading.
+    let trailing = if body.is_empty() { 0 } else { text.len() - text.trim_end_matches(' ').len() };
+    let body = body.replace("\r\n", "\n");
+    let mut chars = std::iter::repeat_n('·', leading)
+        .chain(body.chars().map(|c| match c {
+            '\n' | '\r' => '⏎',
+            '\t' => '⇥',
+            c => c,
+        }))
+        .chain(std::iter::repeat_n('·', trailing));
+    let mut out: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        out.push('…');
+    }
+    out
+}
+
+/// The color of an item that is only a hex color code, like `#3584e4`, as red,
+/// green, blue and alpha. Takes `#` and 3, 4, 6 or 8 hex digits. Unlike Maccy,
+/// the `#` is required, so words like "decade" don't count.
+pub fn hex_color(text: &str) -> Option<[u8; 4]> {
+    let digits = text.trim().strip_prefix('#')?;
+    if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    // All ASCII now, so every byte index is a character boundary.
+    let hex = |start: usize, len: usize| u8::from_str_radix(&digits[start..start + len], 16).ok();
+    let channels: Vec<u8> = match digits.len() {
+        3 | 4 => (0..digits.len()).map(|i| hex(i, 1).map(|nibble| nibble * 17)).collect::<Option<_>>()?,
+        6 | 8 => (0..digits.len()).step_by(2).map(|i| hex(i, 2)).collect::<Option<_>>()?,
+        _ => return None,
+    };
+    Some([channels[0], channels[1], channels[2], channels.get(3).copied().unwrap_or(255)])
+}
+
 /// Single-line preview of `text`: whitespace runs collapse to one space and the
 /// result is cut to `max_chars` characters, ending in an ellipsis when cut.
 pub fn preview(text: &str, max_chars: usize) -> String {
@@ -79,7 +124,29 @@ pub fn preview(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview, thumbnail_size};
+    use super::{display_text, hex_color, preview, thumbnail_size};
+
+    #[test]
+    fn special_symbols_show_whitespace() {
+        assert_eq!(display_text("  a b\n\tc\r\nd  ", 80, true), "··a b⏎⇥c⏎d··");
+        assert_eq!(display_text("   ", 80, true), "···");
+        assert_eq!(display_text("a\nb", 80, false), "a b");
+        assert_eq!(display_text("ab\ncd", 3, true), "ab⏎…");
+        assert_eq!(display_text("abc", 3, true), "abc");
+    }
+
+    #[test]
+    fn hex_colors_need_a_hash_and_hex_digits() {
+        assert_eq!(hex_color("#3584e4"), Some([0x35, 0x84, 0xe4, 255]));
+        assert_eq!(hex_color(" #FFF\n"), Some([255, 255, 255, 255]));
+        assert_eq!(hex_color("#f008"), Some([255, 0, 0, 0x88]));
+        assert_eq!(hex_color("#11223344"), Some([0x11, 0x22, 0x33, 0x44]));
+        assert_eq!(hex_color("decade"), None);
+        assert_eq!(hex_color("#12345"), None);
+        assert_eq!(hex_color("#ggg"), None);
+        assert_eq!(hex_color("#fff is white"), None);
+        assert_eq!(hex_color("#éé"), None);
+    }
 
     #[test]
     fn thumbnails_fit_and_keep_aspect_ratio() {

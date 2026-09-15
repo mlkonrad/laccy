@@ -10,6 +10,7 @@
 //!   PCRE2), where `^` and `$` also match at line breaks. History order is kept.
 
 use std::cmp::Reverse;
+use std::ops::Range;
 
 use gio::glib;
 
@@ -62,6 +63,84 @@ pub fn rank<S: AsRef<str>>(haystacks: &[S], query: &str, mode: Mode) -> Result<V
         Mode::Fuzzy => Ok(rank_fuzzy(haystacks, &words)),
         Mode::Regex => rank_regex(haystacks, &query),
     }
+}
+
+/// The byte ranges of `text` that `query` matches in `mode`, sorted and merged,
+/// for highlighting. `text` is what a row shows rather than what [`rank`]
+/// searched, so a matching item can have nothing to highlight.
+pub fn highlights(text: &str, query: &str, mode: Mode) -> Vec<Range<usize>> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut ranges = match mode {
+        Mode::Exact | Mode::Fuzzy => {
+            // Lowercased a character at a time, so each byte maps back to its character in `text`.
+            let mut lower = String::new();
+            let mut origins = Vec::new();
+            for (index, c) in text.char_indices() {
+                for lower_c in c.to_lowercase() {
+                    lower.push(lower_c);
+                    origins.resize(lower.len(), index);
+                }
+            }
+            let query: String = query.chars().flat_map(char::to_lowercase).collect();
+            let words: Vec<&str> = query.split_whitespace().collect();
+            // The whole phrase too, so the spaces between its words are marked with them.
+            let phrase = words.join(" ");
+            let mut ranges: Vec<Range<usize>> =
+                lower.match_indices(&phrase).map(|(start, phrase)| start..start + phrase.len()).collect();
+            for &word in &words {
+                let before = ranges.len();
+                ranges.extend(lower.match_indices(word).map(|(start, word)| start..start + word.len()));
+                if ranges.len() == before && mode == Mode::Fuzzy {
+                    ranges.extend(fuzzy_positions(&lower, word));
+                }
+            }
+            ranges
+                .into_iter()
+                .map(|range| {
+                    let last = origins[range.end - 1];
+                    origins[range.start]..last + text[last..].chars().next().map_or(0, char::len_utf8)
+                })
+                .collect()
+        }
+        Mode::Regex => regex_ranges(text, query),
+    };
+    ranges.sort_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => merged.push(range),
+        }
+    }
+    merged
+}
+
+/// Every non-empty match of `pattern` in `text`, matched like [`rank_regex`].
+fn regex_ranges(text: &str, pattern: &str) -> Vec<Range<usize>> {
+    use glib::{IntoGStr, RegexCompileFlags as Compile, RegexMatchFlags as Match};
+
+    let Ok(Some(regex)) = glib::Regex::new(pattern, Compile::CASELESS | Compile::MULTILINE, Match::DEFAULT) else {
+        return Vec::new();
+    };
+    text.run_with_gstr(|text| {
+        let mut ranges = Vec::new();
+        let Ok(info) = regex.match_(text, Match::DEFAULT) else {
+            return ranges;
+        };
+        while info.matches() {
+            if let Some((start, end)) = info.fetch_pos(0) {
+                if end > start {
+                    ranges.push(start as usize..end as usize);
+                }
+            }
+            if info.next().is_err() {
+                break;
+            }
+        }
+        ranges
+    })
 }
 
 fn rank_regex<S: AsRef<str>>(haystacks: &[S], pattern: &str) -> Result<Vec<usize>, glib::Error> {
@@ -125,8 +204,9 @@ const BONUS_CONSECUTIVE: i32 = 4;
 const PENALTY_GAP_START: i32 = 3;
 const PENALTY_GAP_EXTENSION: i32 = 1;
 
-/// How well `word` matches `haystack` as a subsequence, or `None` if it doesn't.
-fn fuzzy_score(haystack: &str, word: &str) -> Option<i32> {
+/// The byte range of the shortest subsequence match of `word` in `haystack`
+/// that ends where the leftmost one does, or `None` if there is none.
+fn fuzzy_span(haystack: &str, word: &str) -> Option<Range<usize>> {
     // The leftmost match ends at `end`. Scanning back from there finds the
     // shortest match that ends in the same place.
     let mut end = 0;
@@ -137,6 +217,28 @@ fn fuzzy_score(haystack: &str, word: &str) -> Option<i32> {
     for c in word.chars().rev() {
         start = haystack[..start].rfind(c)?;
     }
+    Some(start..end)
+}
+
+/// The byte ranges of the letters of `word` that [`fuzzy_span`] matched.
+fn fuzzy_positions(haystack: &str, word: &str) -> Vec<Range<usize>> {
+    let Some(span) = fuzzy_span(haystack, word) else {
+        return Vec::new();
+    };
+    let mut wanted = word.chars().peekable();
+    let mut ranges = Vec::new();
+    for (index, c) in haystack[span.clone()].char_indices() {
+        if wanted.next_if_eq(&c).is_some() {
+            let start = span.start + index;
+            ranges.push(start..start + c.len_utf8());
+        }
+    }
+    ranges
+}
+
+/// How well `word` matches `haystack` as a subsequence, or `None` if it doesn't.
+fn fuzzy_score(haystack: &str, word: &str) -> Option<i32> {
+    let Range { start, end } = fuzzy_span(haystack, word)?;
     let mut score = score_at(haystack, start, word);
     // That misses the word typed out in full further along, which should win.
     // `contains` first because it rejects much faster than `find`.
@@ -268,6 +370,36 @@ mod tests {
         assert!(rank(&haystacks, "f(", Mode::Regex).is_err());
         assert_eq!(rank(&haystacks, r"f\(", Mode::Regex).unwrap(), [0]);
         assert_eq!(rank(&haystacks, "f(", Mode::Exact).unwrap(), [0]);
+    }
+
+    fn highlighted<'a>(text: &'a str, query: &str, mode: Mode) -> Vec<&'a str> {
+        highlights(text, query, mode).into_iter().map(|range| &text[range]).collect()
+    }
+
+    #[test]
+    fn exact_highlights_every_word_ignoring_case() {
+        assert_eq!(highlighted("Hello World, hello", "hello world", Mode::Exact), ["Hello World", "hello"]);
+        assert_eq!(highlighted("ÉCOLE école", "éc", Mode::Exact), ["ÉC", "éc"]);
+        // "İ" lowercases to two characters; the highlight still covers whole characters.
+        assert_eq!(highlighted("xİy", "i", Mode::Exact), ["İ"]);
+        assert!(highlighted("git checkout", "gco", Mode::Exact).is_empty());
+        assert!(highlighted("anything", "  ", Mode::Exact).is_empty());
+    }
+
+    #[test]
+    fn fuzzy_highlights_matched_letters() {
+        assert_eq!(highlighted("git checkout", "gco", Mode::Fuzzy), ["g", "c", "o"]);
+        // A word typed out in full is highlighted as a whole.
+        assert_eq!(highlighted("git checkout", "check", Mode::Fuzzy), ["check"]);
+        assert_eq!(highlighted("··a⏎b", "ab", Mode::Fuzzy), ["a", "b"]);
+    }
+
+    #[test]
+    fn regex_highlights_matches() {
+        assert_eq!(highlighted("see https://a.b and http://c", "https?://", Mode::Regex), ["https://", "http://"]);
+        assert_eq!(highlighted("A1b22", r"\d+", Mode::Regex), ["1", "22"]);
+        assert!(highlighted("abc", "x*", Mode::Regex).is_empty());
+        assert!(highlighted("f(x)", "f(", Mode::Regex).is_empty());
     }
 
     #[test]

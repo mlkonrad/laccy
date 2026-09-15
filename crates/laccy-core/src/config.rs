@@ -30,8 +30,41 @@ pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
 pub const MAX_IMAGE_BYTES_KEY: &str = "max-image-bytes";
 pub const SEARCH_MODE_KEY: &str = "search-mode";
 pub const SORT_BY_KEY: &str = "sort-by";
+pub const HIGHLIGHT_MATCHES_KEY: &str = "highlight-matches";
+pub const SHOW_SPECIAL_SYMBOLS_KEY: &str = "show-special-symbols";
+pub const SHOW_COLOR_SWATCHES_KEY: &str = "show-color-swatches";
+pub const SHOW_APP_ICONS_KEY: &str = "show-app-icons";
 /// Only read by the extension, which adds or removes its top bar icon.
 pub const SHOW_INDICATOR_KEY: &str = "show-indicator";
+
+/// How the popup marks the text a search matched.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Highlight {
+    #[default]
+    Bold,
+    Italic,
+    Underline,
+    Color,
+}
+
+impl Highlight {
+    /// Every style, in the order the preferences window lists them.
+    pub const ALL: [Self; 4] = [Self::Bold, Self::Italic, Self::Underline, Self::Color];
+
+    /// The style's value in GSettings.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bold => "bold",
+            Self::Italic => "italic",
+            Self::Underline => "underline",
+            Self::Color => "color",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|style| style.name() == name)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -59,6 +92,14 @@ pub struct Config {
     pub search_mode: search::Mode,
     /// The order of unpinned items.
     pub sort_by: SortOrder,
+    /// How the popup marks the text a search matched.
+    pub highlight_matches: Highlight,
+    /// Show whitespace as symbols in the popup, see [`crate::display_text`].
+    pub show_special_symbols: bool,
+    /// Show a swatch next to items that are a hex color, see [`crate::hex_color`].
+    pub show_color_swatches: bool,
+    /// Show the icon of the app each item was copied from.
+    pub show_app_icons: bool,
 }
 
 /// Used when the schema can't be found. Must match the schema's defaults,
@@ -78,6 +119,10 @@ impl Default for Config {
             max_image_bytes: 10 * 1024 * 1024,
             search_mode: search::Mode::Exact,
             sort_by: SortOrder::LastCopied,
+            highlight_matches: Highlight::Bold,
+            show_special_symbols: true,
+            show_color_swatches: true,
+            show_app_icons: false,
         }
     }
 }
@@ -102,6 +147,10 @@ impl Config {
             max_image_bytes: settings.uint(MAX_IMAGE_BYTES_KEY) as usize,
             search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
             sort_by: SortOrder::from_name(&settings.string(SORT_BY_KEY)).unwrap_or_default(),
+            highlight_matches: Highlight::from_name(&settings.string(HIGHLIGHT_MATCHES_KEY)).unwrap_or_default(),
+            show_special_symbols: settings.boolean(SHOW_SPECIAL_SYMBOLS_KEY),
+            show_color_swatches: settings.boolean(SHOW_COLOR_SWATCHES_KEY),
+            show_app_icons: settings.boolean(SHOW_APP_ICONS_KEY),
         }
     }
 
@@ -369,6 +418,15 @@ mod tests {
         for mode in search::Mode::ALL {
             settings.set_string(SEARCH_MODE_KEY, mode.name()).unwrap();
             assert_eq!(Config::from_settings(&settings).search_mode, mode);
+        }
+    }
+
+    #[test]
+    fn schema_lists_every_highlight_style() {
+        let settings = test_settings();
+        for style in Highlight::ALL {
+            settings.set_string(HIGHLIGHT_MATCHES_KEY, style.name()).unwrap();
+            assert_eq!(Config::from_settings(&settings).highlight_matches, style);
         }
     }
 

@@ -74,6 +74,32 @@
       <summary>Sort by</summary>
       <description>The order of unpinned items: most recently copied first, most recently first copied first, or most copied first. Pinned items always stay at the top.</description>
     </key>
+    <key name="highlight-matches" type="s">
+      <choices>
+        <choice value="bold"/>
+        <choice value="italic"/>
+        <choice value="underline"/>
+        <choice value="color"/>
+      </choices>
+      <default>'bold'</default>
+      <summary>Highlight matches</summary>
+      <description>How the popup marks the text a search matched.</description>
+    </key>
+    <key name="show-special-symbols" type="b">
+      <default>true</default>
+      <summary>Show special symbols</summary>
+      <description>Shows leading and trailing spaces as ·, line breaks as ⏎ and tabs as ⇥ in the popup.</description>
+    </key>
+    <key name="show-color-swatches" type="b">
+      <default>true</default>
+      <summary>Show color swatches</summary>
+      <description>Shows a small square of the color next to items that are a hex color code, like #3584e4.</description>
+    </key>
+    <key name="show-app-icons" type="b">
+      <default>false</default>
+      <summary>Show app icons</summary>
+      <description>Shows the icon of the app each item was copied from.</description>
+    </key>
     <key name="show-indicator" type="b">
       <default>true</default>
       <summary>Show icon in top bar</summary>

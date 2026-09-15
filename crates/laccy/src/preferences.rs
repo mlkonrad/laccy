@@ -4,9 +4,10 @@
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
-    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY, PASTE_AUTOMATICALLY_KEY,
-    PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, RECORD_FILES_KEY, RECORD_IMAGES_KEY, RECORD_TEXT_KEY, SEARCH_MODE_KEY,
-    SHOW_INDICATOR_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
+    self, HIGHLIGHT_MATCHES_KEY, HISTORY_SIZE_KEY, Highlight, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY,
+    PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, RECORD_FILES_KEY, RECORD_IMAGES_KEY,
+    RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
+    SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
 };
 use laccy_core::history::SortOrder;
 use laccy_core::search;
@@ -56,6 +57,7 @@ pub fn present(app: &adw::Application) {
 fn preferences_page(settings: &gio::Settings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.add(&general_group(settings));
+    page.add(&appearance_group(settings));
     page.add(&history_group(settings));
     page.add(&ignored_apps_group(settings));
     page.add(&ignored_patterns_group(settings));
@@ -129,19 +131,45 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     );
     group.add(&search_row);
 
-    let indicator_row = adw::SwitchRow::builder()
-        .title("Show Icon in Top Bar")
-        .subtitle("Click it to open the clipboard history, right-click it for preferences")
-        .build();
-    settings.bind(SHOW_INDICATOR_KEY, &indicator_row, "active").build();
-    group.add(&indicator_row);
-
     let pause_row = adw::SwitchRow::builder()
         .title("Pause Recording")
         .subtitle("Copies aren't recorded until this is turned off. Alt-click the top bar icon to toggle it")
         .build();
     settings.bind(PAUSED_KEY, &pause_row, "active").build();
     group.add(&pause_row);
+
+    group
+}
+
+fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Appearance").build();
+
+    let highlight_row = choice_row(
+        settings,
+        HIGHLIGHT_MATCHES_KEY,
+        Highlight::ALL.map(|style| {
+            let label = match style {
+                Highlight::Bold => "Bold",
+                Highlight::Italic => "Italic",
+                Highlight::Underline => "Underline",
+                Highlight::Color => "Color",
+            };
+            (style.name(), label)
+        }),
+    );
+    highlight_row.set_title("Highlight Matches");
+    group.add(&highlight_row);
+
+    for (key, title, subtitle) in [
+        (SHOW_SPECIAL_SYMBOLS_KEY, "Show Special Symbols", "Show leading and trailing spaces as ·, line breaks as ⏎ and tabs as ⇥"),
+        (SHOW_COLOR_SWATCHES_KEY, "Show Color Swatches", "Show the color of items that are a hex color code, like #3584e4"),
+        (SHOW_APP_ICONS_KEY, "Show App Icons", "Show the icon of the app each item was copied from"),
+        (SHOW_INDICATOR_KEY, "Show Icon in Top Bar", "Click it to open the clipboard history, right-click it for more options"),
+    ] {
+        let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).build();
+        settings.bind(key, &row, "active").build();
+        group.add(&row);
+    }
 
     group
 }
