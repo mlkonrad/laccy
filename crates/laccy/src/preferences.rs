@@ -4,7 +4,8 @@
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
-    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, SEARCH_MODE_KEY,
+    self, HISTORY_SIZE_KEY, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY, PASTE_AUTOMATICALLY_KEY,
+    PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, RECORD_FILES_KEY, RECORD_IMAGES_KEY, RECORD_TEXT_KEY, SEARCH_MODE_KEY,
     SHOW_INDICATOR_KEY, TOGGLE_SHORTCUT_KEY,
 };
 use laccy_core::search;
@@ -56,6 +57,7 @@ fn preferences_page(settings: &gio::Settings) -> adw::PreferencesPage {
     page.add(&general_group(settings));
     page.add(&history_group(settings));
     page.add(&ignored_apps_group(settings));
+    page.add(&ignored_patterns_group(settings));
     page
 }
 
@@ -144,6 +146,13 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     settings.bind(SHOW_INDICATOR_KEY, &indicator_row, "active").build();
     group.add(&indicator_row);
 
+    let pause_row = adw::SwitchRow::builder()
+        .title("Pause Recording")
+        .subtitle("Copies aren't recorded until this is turned off. Alt-click the top bar icon to toggle it")
+        .build();
+    settings.bind(PAUSED_KEY, &pause_row, "active").build();
+    group.add(&pause_row);
+
     group
 }
 
@@ -156,7 +165,162 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     settings.bind(HISTORY_SIZE_KEY, &size_row, "value").build();
     group.add(&size_row);
 
+    for (key, title) in [(RECORD_TEXT_KEY, "Save Text"), (RECORD_IMAGES_KEY, "Save Images"), (RECORD_FILES_KEY, "Save Files")] {
+        let row = adw::SwitchRow::builder().title(title).build();
+        settings.bind(key, &row, "active").build();
+        group.add(&row);
+    }
+
     group
+}
+
+fn ignored_patterns_group(settings: &gio::Settings) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("Ignored Patterns")
+        .description(
+            "Text and file copies matching any of these regular expressions are never recorded, like “^sk-” for \
+             API keys. Patterns are case-sensitive unless they start with (?i).",
+        )
+        .build();
+
+    let add_button = gtk::Button::builder()
+        .icon_name("list-add-symbolic")
+        .tooltip_text("Ignore a Pattern")
+        .valign(gtk::Align::Center)
+        .build();
+    add_button.add_css_class("flat");
+    add_button.connect_clicked(glib::clone!(
+        #[strong]
+        settings,
+        move |button| pattern_dialog(&settings).present(Some(button))
+    ));
+    group.set_header_suffix(Some(&add_button));
+
+    let placeholder = gtk::Label::builder()
+        .label("No ignored patterns")
+        .margin_top(12)
+        .margin_bottom(12)
+        .build();
+    placeholder.add_css_class("dim-label");
+    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
+    list.add_css_class("boxed-list");
+    list.set_placeholder(Some(&placeholder));
+    group.add(&list);
+
+    fill_ignored_patterns(&list, settings);
+    settings.connect_changed(
+        Some(IGNORED_PATTERNS_KEY),
+        glib::clone!(
+            #[weak]
+            list,
+            move |settings, _| fill_ignored_patterns(&list, settings)
+        ),
+    );
+
+    group
+}
+
+fn fill_ignored_patterns(list: &gtk::ListBox, settings: &gio::Settings) {
+    list.remove_all();
+    for pattern in strings(settings, IGNORED_PATTERNS_KEY) {
+        let row = adw::ActionRow::builder().title(&pattern).use_markup(false).build();
+        row.add_css_class("monospace");
+
+        let remove_button = gtk::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .tooltip_text("Stop Ignoring")
+            .valign(gtk::Align::Center)
+            .build();
+        remove_button.add_css_class("flat");
+        remove_button.connect_clicked(glib::clone!(
+            #[strong]
+            settings,
+            move |_| {
+                let remaining: Vec<String> =
+                    strings(&settings, IGNORED_PATTERNS_KEY).into_iter().filter(|other| *other != pattern).collect();
+                set_strings(&settings, IGNORED_PATTERNS_KEY, remaining);
+            }
+        ));
+        row.add_suffix(&remove_button);
+        list.append(&row);
+    }
+}
+
+/// A dialog that adds a regular expression to the ignored patterns once it's valid.
+fn pattern_dialog(settings: &gio::Settings) -> adw::Dialog {
+    let entry = adw::EntryRow::builder().title("Regular Expression").build();
+    entry.add_css_class("monospace");
+    let list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .margin_top(6)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+    list.add_css_class("boxed-list");
+    list.append(&entry);
+
+    let add_button = gtk::Button::builder().label("_Add").use_underline(true).sensitive(false).build();
+    add_button.add_css_class("suggested-action");
+    let header = adw::HeaderBar::builder().show_end_title_buttons(false).build();
+    header.pack_end(&add_button);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&list));
+    let dialog = adw::Dialog::builder()
+        .title("Ignore Pattern")
+        .content_width(420)
+        .child(&toolbar)
+        .build();
+
+    entry.connect_changed(glib::clone!(
+        #[weak]
+        add_button,
+        move |entry| {
+            let text = entry.text();
+            // An empty entry isn't an error yet, just not addable.
+            let error = (!text.is_empty()).then(|| config::pattern_error(&text)).flatten();
+            if error.is_some() {
+                entry.add_css_class("error");
+            } else {
+                entry.remove_css_class("error");
+            }
+            entry.set_tooltip_text(error.as_deref());
+            add_button.set_sensitive(!text.is_empty() && error.is_none());
+        }
+    ));
+    add_button.connect_clicked(glib::clone!(
+        #[strong]
+        settings,
+        #[weak]
+        dialog,
+        #[weak]
+        entry,
+        move |_| {
+            let pattern = entry.text().to_string();
+            if config::pattern_error(&pattern).is_some() {
+                return;
+            }
+            let mut patterns = strings(&settings, IGNORED_PATTERNS_KEY);
+            if !patterns.contains(&pattern) {
+                patterns.push(pattern);
+                set_strings(&settings, IGNORED_PATTERNS_KEY, patterns);
+            }
+            dialog.close();
+        }
+    ));
+    entry.connect_entry_activated(glib::clone!(
+        #[weak]
+        add_button,
+        move |_| {
+            if add_button.is_sensitive() {
+                add_button.emit_clicked();
+            }
+        }
+    ));
+
+    dialog
 }
 
 fn ignored_apps_group(settings: &gio::Settings) -> adw::PreferencesGroup {
@@ -207,7 +371,7 @@ fn ignored_apps_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 fn fill_ignored_apps(list: &gtk::ListBox, settings: &gio::Settings) {
     list.remove_all();
     let installed = gio::AppInfo::all();
-    for app_id in ignored_apps(settings) {
+    for app_id in strings(settings, IGNORED_APPS_KEY) {
         let info = installed.iter().find(|app| app.id().is_some_and(|id| id == app_id.as_str()));
         let row = adw::ActionRow::builder().use_markup(false).build();
         match &info {
@@ -230,8 +394,8 @@ fn fill_ignored_apps(list: &gtk::ListBox, settings: &gio::Settings) {
             settings,
             move |_| {
                 let remaining: Vec<String> =
-                    ignored_apps(&settings).into_iter().filter(|ignored| *ignored != app_id).collect();
-                set_ignored_apps(&settings, remaining);
+                    strings(&settings, IGNORED_APPS_KEY).into_iter().filter(|ignored| *ignored != app_id).collect();
+                set_strings(&settings, IGNORED_APPS_KEY,remaining);
             }
         ));
         row.add_suffix(&remove_button);
@@ -241,7 +405,7 @@ fn fill_ignored_apps(list: &gtk::ListBox, settings: &gio::Settings) {
 
 /// A dialog listing installed apps; picking one adds it to the ignored apps.
 fn app_picker(settings: &gio::Settings) -> adw::Dialog {
-    let ignored = ignored_apps(settings);
+    let ignored = strings(settings, IGNORED_APPS_KEY);
     let mut apps: Vec<(String, gio::AppInfo)> = gio::AppInfo::all()
         .into_iter()
         .filter(|app| app.should_show())
@@ -280,9 +444,9 @@ fn app_picker(settings: &gio::Settings) -> adw::Dialog {
             #[weak]
             dialog,
             move |_| {
-                let mut ignored = ignored_apps(&settings);
+                let mut ignored = strings(&settings, IGNORED_APPS_KEY);
                 ignored.push(app_id.clone());
-                set_ignored_apps(&settings, ignored);
+                set_strings(&settings, IGNORED_APPS_KEY,ignored);
                 dialog.close();
             }
         ));
@@ -416,12 +580,12 @@ fn app_icon(icon: Option<gio::Icon>) -> gtk::Image {
     image
 }
 
-fn ignored_apps(settings: &gio::Settings) -> Vec<String> {
-    settings.strv(IGNORED_APPS_KEY).iter().map(ToString::to_string).collect()
+fn strings(settings: &gio::Settings, key: &str) -> Vec<String> {
+    settings.strv(key).iter().map(ToString::to_string).collect()
 }
 
-fn set_ignored_apps(settings: &gio::Settings, apps: Vec<String>) {
-    if let Err(err) = settings.set_strv(IGNORED_APPS_KEY, apps) {
-        eprintln!("laccy: cannot save ignored apps: {err}");
+fn set_strings(settings: &gio::Settings, key: &str, values: Vec<String>) {
+    if let Err(err) = settings.set_strv(key, values) {
+        eprintln!("laccy: cannot save {key}: {err}");
     }
 }

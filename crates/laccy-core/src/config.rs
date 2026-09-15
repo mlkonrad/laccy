@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use gio::glib;
 use gio::prelude::*;
 
 use crate::history::{Content, Format};
@@ -17,6 +18,13 @@ pub const PASTE_AUTOMATICALLY_KEY: &str = "paste-automatically";
 pub const PASTE_WITHOUT_FORMATTING_KEY: &str = "paste-without-formatting";
 pub const HISTORY_SIZE_KEY: &str = "history-size";
 pub const IGNORED_APPS_KEY: &str = "ignored-apps";
+pub const IGNORED_PATTERNS_KEY: &str = "ignored-patterns";
+/// Only read by the extension, which stops passing copies on while it's set.
+pub const PAUSED_KEY: &str = "paused";
+/// Also read by the extension, so it doesn't read content the daemon would drop.
+pub const RECORD_TEXT_KEY: &str = "record-text";
+pub const RECORD_IMAGES_KEY: &str = "record-images";
+pub const RECORD_FILES_KEY: &str = "record-files";
 pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
 /// Also read by the extension, so it doesn't send the daemon images it would drop.
 pub const MAX_IMAGE_BYTES_KEY: &str = "max-image-bytes";
@@ -36,6 +44,12 @@ pub struct Config {
     pub paste_without_formatting: bool,
     /// Desktop app IDs whose copies are never recorded, e.g. `org.keepassxc.KeePassXC.desktop`.
     pub ignored_apps: Vec<String>,
+    /// Regular expressions; text and file copies matching any of them are not recorded.
+    pub ignored_patterns: Vec<String>,
+    /// Which kinds of copies are recorded.
+    pub record_text: bool,
+    pub record_images: bool,
+    pub record_files: bool,
     /// Text and file copies larger than this are not recorded.
     pub max_item_bytes: usize,
     /// Image copies larger than this are not recorded.
@@ -53,6 +67,10 @@ impl Default for Config {
             paste_automatically: false,
             paste_without_formatting: false,
             ignored_apps: Vec::new(),
+            ignored_patterns: Vec::new(),
+            record_text: true,
+            record_images: true,
+            record_files: true,
             max_item_bytes: 1024 * 1024,
             max_image_bytes: 10 * 1024 * 1024,
             search_mode: search::Mode::Exact,
@@ -72,6 +90,10 @@ impl Config {
             paste_automatically: settings.boolean(PASTE_AUTOMATICALLY_KEY),
             paste_without_formatting: settings.boolean(PASTE_WITHOUT_FORMATTING_KEY),
             ignored_apps: settings.strv(IGNORED_APPS_KEY).iter().map(ToString::to_string).collect(),
+            ignored_patterns: settings.strv(IGNORED_PATTERNS_KEY).iter().map(ToString::to_string).collect(),
+            record_text: settings.boolean(RECORD_TEXT_KEY),
+            record_images: settings.boolean(RECORD_IMAGES_KEY),
+            record_files: settings.boolean(RECORD_FILES_KEY),
             max_item_bytes: settings.uint(MAX_ITEM_BYTES_KEY) as usize,
             max_image_bytes: settings.uint(MAX_IMAGE_BYTES_KEY) as usize,
             search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
@@ -88,16 +110,42 @@ impl Config {
             return false;
         }
         match content {
-            Content::Text(text) => !text.trim().is_empty() && text.len() <= self.max_item_bytes,
+            Content::Text(text) => {
+                self.record_text
+                    && !text.trim().is_empty()
+                    && text.len() <= self.max_item_bytes
+                    && !self.matches_ignored_pattern(text)
+            }
             Content::Files(uris) => {
-                !uris.is_empty()
+                self.record_files
+                    && !uris.is_empty()
                     && uris.iter().map(String::len).sum::<usize>() <= self.max_item_bytes
                     && uris.iter().all(|uri| files::path(uri).is_some())
+                    && !self.matches_ignored_pattern(
+                        &uris.iter().map(|uri| files::display_path(uri)).collect::<Vec<_>>().join("\n"),
+                    )
             }
             Content::Image { mime_type, data } => {
-                mime_type.starts_with("image/") && !data.is_empty() && data.len() <= self.max_image_bytes
+                self.record_images
+                    && mime_type.starts_with("image/")
+                    && !data.is_empty()
+                    && data.len() <= self.max_image_bytes
             }
         }
+    }
+
+    /// Whether any ignored pattern matches somewhere in `text`. Invalid patterns
+    /// match nothing, as in Maccy.
+    fn matches_ignored_pattern(&self, text: &str) -> bool {
+        use glib::IntoGStr;
+
+        self.ignored_patterns.iter().any(|pattern| {
+            compile_pattern(pattern).ok().flatten().is_some_and(|regex| {
+                text.run_with_gstr(|text| {
+                    regex.match_(text, glib::RegexMatchFlags::DEFAULT).is_ok_and(|info| info.matches())
+                })
+            })
+        })
     }
 
     /// The formatted versions of a text copy worth keeping: known formats no
@@ -112,6 +160,19 @@ impl Config {
             })
             .collect()
     }
+}
+
+/// Why `pattern` can't be an ignored pattern, or `None` if it's a valid one.
+pub fn pattern_error(pattern: &str) -> Option<String> {
+    if pattern.is_empty() {
+        return Some("The pattern is empty".to_owned());
+    }
+    compile_pattern(pattern).err().map(|err| err.message().to_owned())
+}
+
+/// Case-sensitive like Maccy's patterns; `(?i)` turns that off.
+fn compile_pattern(pattern: &str) -> Result<Option<glib::Regex>, glib::Error> {
+    glib::Regex::new(pattern, glib::RegexCompileFlags::DEFAULT, glib::RegexMatchFlags::DEFAULT)
 }
 
 /// Laccy's settings, using the schema that ships with the GNOME Shell
@@ -190,8 +251,12 @@ mod tests {
         settings.set_boolean(PASTE_WITHOUT_FORMATTING_KEY, true).unwrap();
         settings.set_strv(IGNORED_APPS_KEY, ["org.keepassxc.KeePassXC.desktop"]).unwrap();
         settings.set_string(SEARCH_MODE_KEY, "fuzzy").unwrap();
+        settings.set_strv(IGNORED_PATTERNS_KEY, ["^sk-"]).unwrap();
+        settings.set_boolean(RECORD_IMAGES_KEY, false).unwrap();
 
         let config = Config::from_settings(&settings);
+        assert_eq!(config.ignored_patterns, ["^sk-"]);
+        assert!(config.record_text && !config.record_images && config.record_files);
         assert_eq!(config.history_size, 50);
         assert!(config.paste_automatically);
         assert!(config.paste_without_formatting);
@@ -226,6 +291,51 @@ mod tests {
         assert!(!config.should_record(&image("image/png", b""), ""));
         assert!(!config.should_record(&image("image/png", b"12345"), ""));
         assert!(!config.should_record(&image("text/html", b"1234"), ""));
+    }
+
+    #[test]
+    fn records_only_enabled_kinds() {
+        let text = Content::Text("hello".to_owned());
+        let files = Content::Files(vec!["file:///a".to_owned()]);
+        let image = Content::Image { mime_type: "image/png".to_owned(), data: b"1234".to_vec() };
+
+        let config = Config { record_text: false, ..Config::default() };
+        assert!(!config.should_record(&text, ""));
+        assert!(config.should_record(&files, "") && config.should_record(&image, ""));
+
+        let config = Config { record_files: false, ..Config::default() };
+        assert!(!config.should_record(&files, ""));
+        assert!(config.should_record(&text, "") && config.should_record(&image, ""));
+
+        let config = Config { record_images: false, ..Config::default() };
+        assert!(!config.should_record(&image, ""));
+        assert!(config.should_record(&text, "") && config.should_record(&files, ""));
+    }
+
+    #[test]
+    fn ignored_patterns_skip_matching_copies() {
+        let config = Config {
+            ignored_patterns: vec!["^sk-[a-z0-9]+$".to_owned(), "(?i)secret".to_owned(), "(unclosed".to_owned()],
+            ..Config::default()
+        };
+        let text = |text: &str| Content::Text(text.to_owned());
+
+        assert!(!config.should_record(&text("sk-abc123"), ""));
+        // `^` and `$` match at the ends of the whole text only.
+        assert!(config.should_record(&text("key:\nsk-abc123\n"), ""));
+        assert!(!config.should_record(&text("my SECRET note"), ""));
+        // Patterns are case-sensitive without (?i); the invalid one matches nothing.
+        assert!(config.should_record(&text("SK-ABC123"), ""));
+        assert!(config.should_record(&text("(unclosed"), ""));
+        // Files match by their paths.
+        assert!(!config.should_record(&Content::Files(vec!["file:///home/me/Secret%20Plans.txt".to_owned()]), ""));
+    }
+
+    #[test]
+    fn validates_patterns() {
+        assert_eq!(pattern_error("^sk-"), None);
+        assert!(pattern_error("(unclosed").is_some());
+        assert!(pattern_error("").is_some());
     }
 
     #[test]

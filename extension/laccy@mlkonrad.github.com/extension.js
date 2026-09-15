@@ -15,6 +15,7 @@ import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const APP_DESKTOP_ID = 'io.github.mlkonrad.Laccy.desktop';
 // The popup window, told apart from the preferences window by its title.
@@ -74,34 +75,73 @@ const PASTE_ALLOWED_US = 2 * 60 * GLib.USEC_PER_SEC;
 const SHOW_INDICATOR_KEY = 'show-indicator';
 const MAX_ITEM_BYTES_KEY = 'max-item-bytes';
 const MAX_IMAGE_BYTES_KEY = 'max-image-bytes';
+const PAUSED_KEY = 'paused';
+const RECORD_TEXT_KEY = 'record-text';
+const RECORD_IMAGES_KEY = 'record-images';
+const RECORD_FILES_KEY = 'record-files';
 const INDICATOR_ICON = 'edit-paste-symbolic';
+// The icon's opacity while recording is paused.
+const PAUSED_OPACITY = 128;
 
-// Top bar icon: left-click opens the clipboard history, right-click shows a menu.
+// Top bar icon: left-click opens the clipboard history, right-click shows a
+// menu. Like Option-clicking Maccy's icon, Alt-click pauses or resumes
+// recording and Alt+Shift-click ignores the next copy.
 const LaccyIndicator = GObject.registerClass(
 class LaccyIndicator extends PanelMenu.Button {
-    _init(openHistory, openPreferences) {
+    // `actions` has openHistory(), openPreferences() and toggleIgnoreNext().
+    _init(settings, actions) {
         super._init(0.5, 'Laccy');
+        this._settings = settings;
 
-        this.add_child(new St.Icon({
+        this._icon = new St.Icon({
             icon_name: INDICATOR_ICON,
             style_class: 'system-status-icon',
-        }));
+        });
+        this.add_child(this._icon);
 
-        this.menu.addAction('Open Clipboard History', openHistory);
-        this.menu.addAction('Preferences', openPreferences);
+        this.menu.addAction('Open Clipboard History', actions.openHistory);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._pauseItem = new PopupMenu.PopupSwitchMenuItem('Pause Recording', false);
+        this._pauseItem.connect('toggled', (_item, state) => settings.set_boolean(PAUSED_KEY, state));
+        this.menu.addMenuItem(this._pauseItem);
+        this._ignoreNextItem = this.menu.addAction('Ignore Next Copy', actions.toggleIgnoreNext);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this.menu.addAction('Preferences', actions.openPreferences);
 
         // PanelMenu.Button opens its menu on any click; split clicks by button instead.
         this._clickGesture.set_enabled(false);
 
         const leftClick = new Clutter.ClickGesture({required_button: Clutter.BUTTON_PRIMARY});
         leftClick.set_recognize_on_press(true);
-        leftClick.connect('recognize', () => openHistory());
+        leftClick.connect('recognize', () => {
+            const [, , mods] = global.get_pointer();
+            if (!(mods & Clutter.ModifierType.MOD1_MASK))
+                actions.openHistory();
+            else if (mods & Clutter.ModifierType.SHIFT_MASK)
+                actions.toggleIgnoreNext();
+            else
+                settings.set_boolean(PAUSED_KEY, !settings.get_boolean(PAUSED_KEY));
+        });
         this.add_action(leftClick);
 
         const rightClick = new Clutter.ClickGesture({required_button: Clutter.BUTTON_SECONDARY});
         rightClick.set_recognize_on_press(true);
         rightClick.connect('recognize', () => this.menu.toggle());
         this.add_action(rightClick);
+
+        settings.connectObject(`changed::${PAUSED_KEY}`, () => this._syncPaused(), this);
+        this._syncPaused();
+        this.setIgnoreNext(false);
+    }
+
+    _syncPaused() {
+        const paused = this._settings.get_boolean(PAUSED_KEY);
+        this._pauseItem.setToggleState(paused);
+        this._icon.opacity = paused ? PAUSED_OPACITY : 255;
+    }
+
+    setIgnoreNext(pending) {
+        this._ignoreNextItem.setOrnament(pending ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.HIDDEN);
     }
 });
 
@@ -110,6 +150,7 @@ export default class LaccyExtension extends Extension {
         this._settings = this.getSettings();
         this._pasteAllowedUntil = 0;
         this._pasteTimeoutId = 0;
+        this._ignoreNext = false;
         this._settingClipboard = false;
         this._restoreIdleId = 0;
 
@@ -186,6 +227,12 @@ export default class LaccyExtension extends Extension {
         // already moved it to the top.
         if (mimeTypes.includes(PICKED_MIME_TYPE))
             return;
+        if (this._settings.get_boolean(PAUSED_KEY))
+            return;
+        if (this._ignoreNext) {
+            this._setIgnoreNext(false);
+            return;
+        }
 
         // Windows without a desktop file get made-up IDs like "window:3"; don't record those.
         const focusAppId = Shell.WindowTracker.get_default().focus_app?.get_id() ?? '';
@@ -220,8 +267,16 @@ export default class LaccyExtension extends Extension {
         }
     }
 
+    _setIgnoreNext(pending) {
+        this._ignoreNext = pending;
+        this._indicator?.setIgnoreNext(pending);
+    }
+
     // Records the copied text, with its formatted versions if `mimeTypes` offers any.
     _recordText(sourceApp, mimeTypes = []) {
+        // The daemon checks the record-* settings too; this avoids reading what it would drop.
+        if (!this._settings.get_boolean(RECORD_TEXT_KEY))
+            return;
         const formatTypes = FORMAT_MIME_TYPES.filter(mimeType => mimeTypes.includes(mimeType));
         this._clipboard.get_text(St.ClipboardType.CLIPBOARD, (_clipboard, text) => {
             if (!this._selection || !text)
@@ -273,14 +328,19 @@ export default class LaccyExtension extends Extension {
                     .filter(line => line && !line.startsWith('#'))
                 : [];
             // Links can come as a URI list too; those are recorded as text.
-            if (uris.length > 0 && uris.every(uri => uri.startsWith('file://')))
-                this._callDaemon('AddFiles', new GLib.Variant('(ass)', [uris, sourceApp]));
-            else
+            if (uris.length > 0 && uris.every(uri => uri.startsWith('file://'))) {
+                // Not recorded as their paths either.
+                if (this._settings.get_boolean(RECORD_FILES_KEY))
+                    this._callDaemon('AddFiles', new GLib.Variant('(ass)', [uris, sourceApp]));
+            } else {
                 this._recordText(sourceApp);
+            }
         });
     }
 
     _recordImage(mimeType, sourceApp) {
+        if (!this._settings.get_boolean(RECORD_IMAGES_KEY))
+            return;
         this._clipboard.get_content(St.ClipboardType.CLIPBOARD, mimeType, (_clipboard, bytes) => {
             if (!this._selection || !bytes?.get_size())
                 return;
@@ -341,9 +401,12 @@ export default class LaccyExtension extends Extension {
     _syncIndicator() {
         const show = this._settings.get_boolean(SHOW_INDICATOR_KEY);
         if (show && !this._indicator) {
-            this._indicator = new LaccyIndicator(
-                () => this._togglePopup(),
-                () => this._openPreferences());
+            this._indicator = new LaccyIndicator(this._settings, {
+                openHistory: () => this._togglePopup(),
+                openPreferences: () => this._openPreferences(),
+                toggleIgnoreNext: () => this._setIgnoreNext(!this._ignoreNext),
+            });
+            this._indicator.setIgnoreNext(this._ignoreNext);
             Main.panel.addToStatusArea(this.uuid, this._indicator);
         } else if (!show && this._indicator) {
             this._indicator.destroy();
