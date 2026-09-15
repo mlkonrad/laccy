@@ -13,7 +13,9 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
@@ -83,12 +85,43 @@ const INDICATOR_ICON = 'edit-paste-symbolic';
 // The icon's opacity while recording is paused.
 const PAUSED_OPACITY = 128;
 
+// Asks before clearing the history, like Maccy's Clear (unpinned items) and
+// Option+Clear (every item). `clear(includePinned)` does it.
+const ClearHistoryDialog = GObject.registerClass(
+class ClearHistoryDialog extends ModalDialog.ModalDialog {
+    _init(clear) {
+        super._init();
+        this.contentLayout.add_child(new Dialog.MessageDialogContent({
+            title: 'Clear History?',
+            description: 'Clear Unpinned keeps pinned items. Clear All removes every item.',
+        }));
+        this.setButtons([{
+            label: 'Cancel',
+            action: () => this.close(),
+            key: Clutter.KEY_Escape,
+        }, {
+            label: 'Clear All',
+            action: () => {
+                this.close();
+                clear(true);
+            },
+        }, {
+            label: 'Clear Unpinned',
+            action: () => {
+                this.close();
+                clear(false);
+            },
+            default: true,
+        }]);
+    }
+});
+
 // Top bar icon: left-click opens the clipboard history, right-click shows a
 // menu. Like Option-clicking Maccy's icon, Alt-click pauses or resumes
 // recording and Alt+Shift-click ignores the next copy.
 const LaccyIndicator = GObject.registerClass(
 class LaccyIndicator extends PanelMenu.Button {
-    // `actions` has openHistory(), openPreferences() and toggleIgnoreNext().
+    // `actions` has openHistory(), openPreferences(), toggleIgnoreNext() and clearHistory().
     _init(settings, actions) {
         super._init(0.5, 'Laccy');
         this._settings = settings;
@@ -105,6 +138,7 @@ class LaccyIndicator extends PanelMenu.Button {
         this._pauseItem.connect('toggled', (_item, state) => settings.set_boolean(PAUSED_KEY, state));
         this.menu.addMenuItem(this._pauseItem);
         this._ignoreNextItem = this.menu.addAction('Ignore Next Copy', actions.toggleIgnoreNext);
+        this.menu.addAction('Clear History…', actions.clearHistory);
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this.menu.addAction('Preferences', actions.openPreferences);
 
@@ -355,7 +389,8 @@ export default class LaccyExtension extends Extension {
         });
     }
 
-    _callDaemon(method, parameters) {
+    // `what` finishes the warning logged when the call fails.
+    _callDaemon(method, parameters, what = 'record clipboard item') {
         Gio.DBus.session.call(
             DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, method, parameters,
             null, Gio.DBusCallFlags.NONE, -1, null,
@@ -363,7 +398,7 @@ export default class LaccyExtension extends Extension {
                 try {
                     connection.call_finish(result);
                 } catch (e) {
-                    console.warn(`Laccy: could not record clipboard item: ${e.message}`);
+                    console.warn(`Laccy: could not ${what}: ${e.message}`);
                 }
             });
     }
@@ -405,6 +440,8 @@ export default class LaccyExtension extends Extension {
                 openHistory: () => this._togglePopup(),
                 openPreferences: () => this._openPreferences(),
                 toggleIgnoreNext: () => this._setIgnoreNext(!this._ignoreNext),
+                clearHistory: () => new ClearHistoryDialog(includePinned =>
+                    this._callDaemon('Clear', new GLib.Variant('(b)', [includePinned]), 'clear the history')).open(),
             });
             this._indicator.setIgnoreNext(this._ignoreNext);
             Main.panel.addToStatusArea(this.uuid, this._indicator);

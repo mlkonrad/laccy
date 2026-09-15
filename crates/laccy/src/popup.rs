@@ -240,7 +240,11 @@ impl Popup {
             gdk::Key::p | gdk::Key::P if mods == Mod::ALT_MASK => self.toggle_pin(),
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::ALT_MASK => self.delete_selected(),
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::SHIFT_MASK => {
-                self.confirm_clear()
+                self.confirm_clear(false)
+            }
+            // Like Maccy's Shift+Option+Command+Delete.
+            gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::ALT_MASK | Mod::SHIFT_MASK => {
+                self.confirm_clear(true)
             }
             gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
             _ if mods == Mod::CONTROL_MASK => match key.to_unicode().and_then(|c| c.to_digit(10)) {
@@ -436,12 +440,23 @@ impl Popup {
         }
     }
 
-    fn confirm_clear(self: &Rc<Self>) {
-        let dialog = adw::AlertDialog::new(
-            Some("Clear History?"),
-            Some("All unpinned items will be removed. Pinned items are kept."),
-        );
-        dialog.add_responses(&[("cancel", "_Cancel"), ("clear", "_Clear")]);
+    /// Asks before removing all unpinned items, or every item when `include_pinned` is set.
+    fn confirm_clear(self: &Rc<Self>, include_pinned: bool) {
+        let dialog = if include_pinned {
+            let dialog = adw::AlertDialog::new(
+                Some("Clear All History?"),
+                Some("All items, including pinned ones, will be removed."),
+            );
+            dialog.add_responses(&[("cancel", "_Cancel"), ("clear", "_Clear All")]);
+            dialog
+        } else {
+            let dialog = adw::AlertDialog::new(
+                Some("Clear History?"),
+                Some("All unpinned items will be removed. Pinned items are kept."),
+            );
+            dialog.add_responses(&[("cancel", "_Cancel"), ("clear", "_Clear")]);
+            dialog
+        };
         dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -451,7 +466,7 @@ impl Popup {
                 #[weak(rename_to = popup)]
                 self,
                 move |_, _| {
-                    if let Err(err) = popup.history.clear(false) {
+                    if let Err(err) = popup.history.clear(include_pinned) {
                         eprintln!("laccy: cannot clear history: {err}");
                     }
                     popup.reload();

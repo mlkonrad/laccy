@@ -31,6 +31,9 @@ const INTROSPECTION: &str = r#"
       <arg name="mime_type" type="s" direction="in"/>
       <arg name="source_app" type="s" direction="in"/>
     </method>
+    <method name="Clear">
+      <arg name="include_pinned" type="b" direction="in"/>
+    </method>
     <signal name="HistoryChanged"/>
   </interface>
 </node>
@@ -80,6 +83,20 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
         .register_object(DAEMON_OBJECT_PATH, &interface)
         .method_call(move |connection, _, _, _, method, params, invocation| {
             // GDBus has already checked the method and its argument types against the XML.
+            if method == "Clear" {
+                let include_pinned = params.get::<(bool,)>().is_some_and(|(include_pinned,)| include_pinned);
+                match history.borrow().clear(include_pinned) {
+                    Ok(_) => {
+                        invocation.return_value(None);
+                        announce_change(&connection);
+                    }
+                    Err(err) => {
+                        eprintln!("laccyd: cannot clear history: {err}");
+                        invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &err.to_string());
+                    }
+                }
+                return;
+            }
             let Some((content, formats, source_app)) = parse_call(method, &params) else {
                 invocation.return_dbus_error("org.freedesktop.DBus.Error.InvalidArgs", method);
                 return;
@@ -97,16 +114,7 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
                 match record(&history, &config, content, &formats, &source_app).await {
                     Ok(()) => {
                         invocation.return_value(None);
-                        let signal = connection.emit_signal(
-                            None,
-                            DAEMON_OBJECT_PATH,
-                            DAEMON_INTERFACE,
-                            HISTORY_CHANGED_SIGNAL,
-                            None,
-                        );
-                        if let Err(err) = signal {
-                            eprintln!("laccyd: cannot announce the new item: {err}");
-                        }
+                        announce_change(&connection);
                     }
                     Err(err) => {
                         eprintln!("laccyd: cannot store clipboard item: {err}");
@@ -124,6 +132,13 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
     if let Err(err) = registration {
         eprintln!("laccyd: cannot export {DAEMON_OBJECT_PATH}: {err}");
         std::process::exit(1);
+    }
+}
+
+/// Tells open popups (and the extension) that the history changed.
+fn announce_change(connection: &gio::DBusConnection) {
+    if let Err(err) = connection.emit_signal(None, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, HISTORY_CHANGED_SIGNAL, None) {
+        eprintln!("laccyd: cannot announce the history change: {err}");
     }
 }
 
