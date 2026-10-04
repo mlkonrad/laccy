@@ -59,10 +59,11 @@
         <choice value="exact"/>
         <choice value="fuzzy"/>
         <choice value="regex"/>
+        <choice value="mixed"/>
       </choices>
       <default>'exact'</default>
       <summary>Search mode</summary>
-      <description>How the popup matches what you type. "exact" matches each word as written; "fuzzy" also matches its letters in order with gaps, so "gco" finds "git checkout"; "regex" matches a regular expression, ignoring case.</description>
+      <description>How the popup matches what you type. "exact" matches each word as written; "fuzzy" also matches its letters in order with gaps, so "gco" finds "git checkout"; "regex" matches a regular expression, ignoring case; "mixed" tries exact, then regex, then fuzzy, and shows the first that finds anything.</description>
     </key>
     <key name="sort-by" type="s">
       <choices>

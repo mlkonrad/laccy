@@ -8,6 +8,8 @@
 //!   and matches at the start of words come first, and history order breaks ties.
 //! - [`Mode::Regex`]: the whole query is one regular expression (GLib's, which is
 //!   PCRE2), where `^` and `$` also match at line breaks. History order is kept.
+//! - [`Mode::Mixed`]: as in Maccy, exact, then regex, then fuzzy, keeping the
+//!   results of the first that finds anything. An invalid pattern finds nothing.
 
 use std::cmp::Reverse;
 use std::ops::Range;
@@ -20,11 +22,12 @@ pub enum Mode {
     Exact,
     Fuzzy,
     Regex,
+    Mixed,
 }
 
 impl Mode {
     /// Every mode, in the order the preferences window lists them.
-    pub const ALL: [Self; 3] = [Self::Exact, Self::Fuzzy, Self::Regex];
+    pub const ALL: [Self; 4] = [Self::Exact, Self::Fuzzy, Self::Regex, Self::Mixed];
 
     /// The mode's value in GSettings.
     pub fn name(self) -> &'static str {
@@ -32,6 +35,7 @@ impl Mode {
             Self::Exact => "exact",
             Self::Fuzzy => "fuzzy",
             Self::Regex => "regex",
+            Self::Mixed => "mixed",
         }
     }
 
@@ -43,7 +47,9 @@ impl Mode {
 /// Prepares item text for [`rank`] in `mode`. Do this once per item, not per keystroke.
 pub fn normalize(text: &str, mode: Mode) -> String {
     match mode {
-        Mode::Exact | Mode::Fuzzy => text.to_lowercase(),
+        // Mixed searches lowercased text with patterns too. They ignore case, so
+        // that only changes classes like \p{Lu} (an uppercase letter).
+        Mode::Exact | Mode::Fuzzy | Mode::Mixed => text.to_lowercase(),
         // Patterns ignore case themselves, and lowercasing the query would turn
         // escapes like \D (not a digit) into others (\d, a digit).
         Mode::Regex => text.to_owned(),
@@ -51,29 +57,41 @@ pub fn normalize(text: &str, mode: Mode) -> String {
 }
 
 /// Indices of the matching `haystacks` (already [`normalize`]d for `mode`), best
-/// first. Fails only in [`Mode::Regex`], when `query` isn't a valid pattern.
-pub fn rank<S: AsRef<str>>(haystacks: &[S], query: &str, mode: Mode) -> Result<Vec<usize>, glib::Error> {
-    let query = normalize(query, mode);
-    let words: Vec<&str> = query.split_whitespace().collect();
+/// first, and the mode that matched them, which is `mode` unless it's
+/// [`Mode::Mixed`]. Fails only in [`Mode::Regex`], when `query` isn't a valid pattern.
+pub fn rank<S: AsRef<str>>(haystacks: &[S], query: &str, mode: Mode) -> Result<(Vec<usize>, Mode), glib::Error> {
+    let normalized = normalize(query, mode);
+    let words: Vec<&str> = normalized.split_whitespace().collect();
     if words.is_empty() {
-        return Ok((0..haystacks.len()).collect());
+        return Ok(((0..haystacks.len()).collect(), mode));
     }
     match mode {
-        Mode::Exact => Ok(rank_exact(haystacks, &words)),
-        Mode::Fuzzy => Ok(rank_fuzzy(haystacks, &words)),
-        Mode::Regex => rank_regex(haystacks, &query),
+        Mode::Exact => Ok((rank_exact(haystacks, &words), mode)),
+        Mode::Fuzzy => Ok((rank_fuzzy(haystacks, &words), mode)),
+        Mode::Regex => Ok((rank_regex(haystacks, &normalized)?, mode)),
+        Mode::Mixed => {
+            let exact = rank_exact(haystacks, &words);
+            if !exact.is_empty() {
+                return Ok((exact, Mode::Exact));
+            }
+            let regex = rank_regex(haystacks, query).unwrap_or_default();
+            if !regex.is_empty() {
+                return Ok((regex, Mode::Regex));
+            }
+            Ok((rank_fuzzy(haystacks, &words), Mode::Fuzzy))
+        }
     }
 }
 
 /// The byte ranges of `text` that `query` matches in `mode`, sorted and merged,
-/// for highlighting. `text` is what a row shows rather than what [`rank`]
+/// for highlighting, where `mode` is the one [`rank`] says matched. `text` is what a row shows rather than what [`rank`]
 /// searched, so a matching item can have nothing to highlight.
 pub fn highlights(text: &str, query: &str, mode: Mode) -> Vec<Range<usize>> {
     if query.trim().is_empty() {
         return Vec::new();
     }
     let mut ranges = match mode {
-        Mode::Exact | Mode::Fuzzy => {
+        Mode::Exact | Mode::Fuzzy | Mode::Mixed => {
             // Lowercased a character at a time, so each byte maps back to its character in `text`.
             let mut lower = String::new();
             let mut origins = Vec::new();
@@ -291,7 +309,7 @@ mod tests {
 
     fn run(items: &[&str], query: &str, mode: Mode) -> Vec<usize> {
         let haystacks: Vec<String> = items.iter().map(|item| normalize(item, mode)).collect();
-        rank(&haystacks, query, mode).unwrap()
+        rank(&haystacks, query, mode).unwrap().0
     }
 
     #[test]
@@ -368,8 +386,29 @@ mod tests {
     fn invalid_regex_is_an_error() {
         let haystacks = [normalize("f(x)", Mode::Regex)];
         assert!(rank(&haystacks, "f(", Mode::Regex).is_err());
-        assert_eq!(rank(&haystacks, r"f\(", Mode::Regex).unwrap(), [0]);
-        assert_eq!(rank(&haystacks, "f(", Mode::Exact).unwrap(), [0]);
+        assert_eq!(rank(&haystacks, r"f\(", Mode::Regex).unwrap().0, [0]);
+        assert_eq!(rank(&haystacks, "f(", Mode::Exact).unwrap().0, [0]);
+    }
+
+    fn mixed(items: &[&str], query: &str) -> (Vec<usize>, Mode) {
+        let haystacks: Vec<String> = items.iter().map(|item| normalize(item, Mode::Mixed)).collect();
+        rank(&haystacks, query, Mode::Mixed).unwrap()
+    }
+
+    #[test]
+    fn mixed_prefers_exact_then_regex_then_fuzzy() {
+        let items = ["git checkout", "Make -O2", "https://a.b"];
+        assert_eq!(mixed(&items, "MAKE"), (vec![1], Mode::Exact));
+        assert_eq!(mixed(&items, "^https?://"), (vec![2], Mode::Regex));
+        assert_eq!(mixed(&items, r"-o\d"), (vec![1], Mode::Regex));
+        assert_eq!(mixed(&items, "gco"), (vec![0], Mode::Fuzzy));
+        assert_eq!(mixed(&items, "xyz"), (vec![], Mode::Fuzzy));
+    }
+
+    #[test]
+    fn mixed_skips_invalid_patterns() {
+        assert_eq!(mixed(&["f(x)"], "f("), (vec![0], Mode::Exact));
+        assert_eq!(mixed(&["f(x)"], "fx)"), (vec![0], Mode::Fuzzy));
     }
 
     fn highlighted<'a>(text: &'a str, query: &str, mode: Mode) -> Vec<&'a str> {

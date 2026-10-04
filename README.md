@@ -150,7 +150,7 @@ in the top bar, by right-clicking Laccy in the app grid and choosing
 - **Open Laccy:** the shortcut. Click it and press the new key combination.
 - **Paste Automatically:** also paste after picking an item (off by default).
 - **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).
-- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
+- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything, like Maccy (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Pause Recording:** copies aren't recorded until you turn it off (off by default).
 
 Appearance:
@@ -199,6 +199,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Images and file copies
 - [x] Fuzzy search mode
 - [x] Regex search mode
+- [x] Mixed search mode
 - [x] Formatted text (HTML/RTF) and paste without formatting
 - [x] Live refresh while the popup is open
 - [x] Pause recording, ignore next copy, ignored patterns, and choosing which kinds of copies are saved

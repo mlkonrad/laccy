@@ -105,6 +105,7 @@ impl Popup {
             history: Rc::clone(&history),
             config: config.clone(),
             query: RefCell::default(),
+            mode: Cell::new(config.search_mode),
             apps: OnceCell::new(),
             list_items: RefCell::default(),
         });
@@ -128,7 +129,7 @@ impl Popup {
         let search = gtk::SearchEntry::builder()
             .placeholder_text(match config.search_mode {
                 search::Mode::Regex => "Search clipboard history with a regular expression",
-                search::Mode::Exact | search::Mode::Fuzzy => "Search clipboard history",
+                search::Mode::Exact | search::Mode::Fuzzy | search::Mode::Mixed => "Search clipboard history",
             })
             .search_delay(0)
             .margin_top(8)
@@ -362,7 +363,7 @@ impl Popup {
         let haystacks = self.haystacks.borrow();
         let query = self.search.text();
         let mode = self.config.search_mode;
-        let ranked = match search::rank(&haystacks, &query, mode) {
+        let (ranked, matched_mode) = match search::rank(&haystacks, &query, mode) {
             Ok(ranked) => {
                 self.valid_query.replace(query.to_string());
                 self.search.remove_css_class("error");
@@ -373,7 +374,7 @@ impl Popup {
             Err(err) => {
                 self.search.add_css_class("error");
                 self.search.set_tooltip_text(Some(err.message()));
-                search::rank(&haystacks, &self.valid_query.borrow(), mode).unwrap_or_default()
+                search::rank(&haystacks, &self.valid_query.borrow(), mode).unwrap_or((Vec::new(), mode))
             }
         };
         let matches: Vec<glib::BoxedAnyObject> = ranked
@@ -382,6 +383,7 @@ impl Popup {
             .collect();
         // Rows bound by the splice highlight this query; rows GTK keeps bound are updated after.
         self.rows.query.replace(self.valid_query.borrow().clone());
+        self.rows.mode.set(matched_mode);
         self.store.splice(0, self.store.n_items(), &matches);
         self.rows.refresh_highlights();
 
@@ -977,6 +979,8 @@ struct RowState {
     config: Config,
     /// The last valid query, whose matches rows highlight.
     query: RefCell<String>,
+    /// The mode that matched it, which Mixed picks per query.
+    mode: Cell<search::Mode>,
     /// Installed apps' icons and names by desktop ID, read when the first row needs one.
     apps: OnceCell<HashMap<String, (gio::Icon, String)>>,
     /// Every row's list item. GTK can keep rows bound when the search changes,
@@ -1000,7 +1004,7 @@ impl RowState {
 
     /// Marks what the query matches in a row's label.
     fn highlight(&self, label: &gtk::Label) {
-        let ranges = search::highlights(&label.text(), &self.query.borrow(), self.config.search_mode);
+        let ranges = search::highlights(&label.text(), &self.query.borrow(), self.mode.get());
         label.set_attributes(highlight_attributes(&ranges, self.config.highlight_matches).as_ref());
     }
 

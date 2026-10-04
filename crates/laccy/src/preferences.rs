@@ -122,6 +122,7 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
                 search::Mode::Exact => "Exact",
                 search::Mode::Fuzzy => "Fuzzy",
                 search::Mode::Regex => "Regular Expression",
+                search::Mode::Mixed => "Mixed",
             };
             (mode.name(), label)
         }),
@@ -129,7 +130,8 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     search_row.set_title("Search Mode");
     search_row.set_subtitle(
         "Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”. \
-         Regular Expression matches a pattern, like “^https?://”",
+         Regular Expression matches a pattern, like “^https?://”. \
+         Mixed tries Exact, then Regular Expression, then Fuzzy",
     );
     group.add(&search_row);
 
