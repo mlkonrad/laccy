@@ -89,7 +89,7 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 
     let shortcut_row = adw::ActionRow::builder()
         .title("Open Laccy")
-        .subtitle("Opens and closes the clipboard history")
+        .subtitle("The keyboard shortcut that shows your clipboard history")
         .activatable(true)
         .build();
     shortcut_row.add_suffix(&shortcut_label);
@@ -102,14 +102,14 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 
     let paste_row = adw::SwitchRow::builder()
         .title("Paste Automatically")
-        .subtitle("Paste into the focused app after picking an item, instead of only copying it. Alt+Enter does the opposite")
+        .subtitle("Paste the item you pick right away instead of only copying it. Alt+Enter does the opposite")
         .build();
     settings.bind(PASTE_AUTOMATICALLY_KEY, &paste_row, "active").build();
     group.add(&paste_row);
 
     let formatting_row = adw::SwitchRow::builder()
         .title("Paste Without Formatting")
-        .subtitle("Pick text without formatting like bold or links. Alt+Shift+Enter does the opposite")
+        .subtitle("Paste text without bold, links or other styling. Alt+Shift+Enter does the opposite")
         .build();
     settings.bind(PASTE_WITHOUT_FORMATTING_KEY, &formatting_row, "active").build();
     group.add(&formatting_row);
@@ -128,16 +128,24 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         }),
     );
     search_row.set_title("Search Mode");
-    search_row.set_subtitle(
-        "Fuzzy also finds items whose letters appear in order, like “gco” for “git checkout”. \
-         Regular Expression matches a pattern, like “^https?://”. \
-         Mixed tries Exact, then Regular Expression, then Fuzzy",
-    );
+    // Only the chosen mode is described, so the row stays short enough to show its value.
+    let describe = |row: &adw::ComboRow| {
+        let description = match search::Mode::ALL.get(row.selected() as usize) {
+            Some(search::Mode::Exact) => "Finds items that contain every word you type",
+            Some(search::Mode::Fuzzy) => "Also finds words with letters left out, so “gco” finds “git checkout”",
+            Some(search::Mode::Regex) => "Finds patterns, like “^https?://” for links",
+            Some(search::Mode::Mixed) => "Tries Exact, then Regular Expression, then Fuzzy, until something matches",
+            None => "",
+        };
+        row.set_subtitle(description);
+    };
+    describe(&search_row);
+    search_row.connect_selected_notify(describe);
     group.add(&search_row);
 
     let pause_row = adw::SwitchRow::builder()
         .title("Pause Recording")
-        .subtitle("Copies aren't recorded until this is turned off. Alt-click the top bar icon to toggle it")
+        .subtitle("Stop saving new copies for a while. Alt-click the top bar icon to switch it quickly")
         .build();
     settings.bind(PAUSED_KEY, &pause_row, "active").build();
     group.add(&pause_row);
@@ -165,10 +173,10 @@ fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     group.add(&highlight_row);
 
     for (key, title, subtitle) in [
-        (SHOW_SPECIAL_SYMBOLS_KEY, "Show Special Symbols", "Show leading and trailing spaces as ·, line breaks as ⏎ and tabs as ⇥"),
-        (SHOW_COLOR_SWATCHES_KEY, "Show Color Swatches", "Show the color of items that are a hex color code, like #3584e4"),
-        (SHOW_APP_ICONS_KEY, "Show App Icons", "Show the icon of the app each item was copied from"),
-        (SHOW_INDICATOR_KEY, "Show Icon in Top Bar", "Click it to open the clipboard history, right-click it for more options"),
+        (SHOW_SPECIAL_SYMBOLS_KEY, "Show Special Symbols", "Make spaces at the ends, line breaks and tabs visible as ·, ⏎ and ⇥"),
+        (SHOW_COLOR_SWATCHES_KEY, "Show Color Swatches", "Show a small square of color next to color codes like #3584e4"),
+        (SHOW_APP_ICONS_KEY, "Show App Icons", "Show which app each item was copied from"),
+        (SHOW_INDICATOR_KEY, "Show Icon in Top Bar", "Click it to open your clipboard history, right-click it for more options"),
     ] {
         let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).build();
         settings.bind(key, &row, "active").build();
@@ -177,7 +185,7 @@ fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 
     let latest_row = adw::SwitchRow::builder()
         .title("Show Latest Copy in Top Bar")
-        .subtitle("Show the start of the most recent unpinned item next to the icon")
+        .subtitle("Show the beginning of your most recent copy next to the icon")
         .build();
     settings.bind(SHOW_LATEST_COPY_KEY, &latest_row, "active").build();
     settings.bind(SHOW_INDICATOR_KEY, &latest_row, "sensitive").flags(gio::SettingsBindFlags::GET).build();
@@ -189,19 +197,19 @@ fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 fn preview_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Preview")
-        .description("Ctrl+Space shows the selected item in full next to the list, with where and when it was copied.")
+        .description("Press Ctrl+Space to see the selected item in full, along with where and when you copied it.")
         .build();
 
     let automatic_row = adw::SwitchRow::builder()
         .title("Open Automatically")
-        .subtitle("Show the preview once the selection rests")
+        .subtitle("Show the preview when you pause on an item")
         .build();
     settings.bind(PREVIEW_AUTOMATICALLY_KEY, &automatic_row, "active").build();
     group.add(&automatic_row);
 
     let delay_row = adw::SpinRow::with_range(200.0, 100_000.0, 100.0);
     delay_row.set_title("Delay");
-    delay_row.set_subtitle("Milliseconds before the preview opens");
+    delay_row.set_subtitle("How long to wait before showing it, in milliseconds");
     settings.bind(PREVIEW_DELAY_KEY, &delay_row, "value").build();
     automatic_row.bind_property("active", &delay_row, "sensitive").sync_create().build();
     group.add(&delay_row);
@@ -214,7 +222,7 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 
     let size_row = adw::SpinRow::with_range(1.0, 10_000.0, 10.0);
     size_row.set_title("History Size");
-    size_row.set_subtitle("Unpinned items to keep. Pinned items are always kept");
+    size_row.set_subtitle("How many items to remember. Pinned items are extra and always kept");
     settings.bind(HISTORY_SIZE_KEY, &size_row, "value").build();
     group.add(&size_row);
 
@@ -247,8 +255,8 @@ fn ignored_patterns_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Ignored Patterns")
         .description(
-            "Text and file copies matching any of these regular expressions are never recorded, like “^sk-” for \
-             API keys. Patterns are case-sensitive unless they start with (?i).",
+            "Copied text and files matching any of these regular expressions are never saved, like “^sk-” to skip \
+             API keys. Upper and lower case must match unless a pattern starts with (?i).",
         )
         .build();
 
@@ -396,7 +404,7 @@ fn ignored_apps_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Ignored Apps")
         .description(
-            "Copies from these apps are never recorded. Copies that password managers mark as secret are always ignored.",
+            "Copies from these apps are never saved. Passwords copied from password managers are always skipped.",
         )
         .build();
 
