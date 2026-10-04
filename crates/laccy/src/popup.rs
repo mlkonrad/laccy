@@ -21,6 +21,8 @@ const POPUP_WIDTH: i32 = 480;
 const POPUP_HEIGHT: i32 = 540;
 /// How much wider the popup gets while the preview is open.
 const PREVIEW_WIDTH: i32 = 400;
+/// More rows than fit in the popup, listed before it first shows (see `Popup::apply_filter`).
+const INITIAL_ROWS: usize = 20;
 
 /// Opens the popup, or closes it if it's already open.
 pub fn toggle(app: &adw::Application) {
@@ -69,6 +71,9 @@ pub struct Popup {
     preview_update: RefCell<Option<glib::SourceId>>,
     /// Set when the preview is closed by hand, so it doesn't open by itself again.
     preview_dismissed: Cell<bool>,
+    /// Matches past the first `INITIAL_ROWS`, listed once the first frame is drawn.
+    deferred_rows: RefCell<Vec<glib::BoxedAnyObject>>,
+    first_frame_drawn: Cell<bool>,
 }
 
 impl Popup {
@@ -96,6 +101,42 @@ impl Popup {
         // Otherwise GTK can start with the footer focused, where Enter would activate Clear.
         popup.search.grab_focus();
         popup.window.present();
+        popup.list_deferred_rows_after_first_frame();
+    }
+
+    fn list_deferred_rows_after_first_frame(self: &Rc<Self>) {
+        let Some(clock) = self.window.frame_clock() else {
+            self.first_frame_drawn.set(true);
+            self.list_deferred_rows();
+            return;
+        };
+        let handler = Rc::new(RefCell::new(None));
+        let id = clock.connect_after_paint(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            #[strong]
+            handler,
+            move |clock| {
+                if let Some(id) = handler.take() {
+                    clock.disconnect(id);
+                }
+                popup.first_frame_drawn.set(true);
+                // Pending input goes first: a query typed meanwhile lists everything itself.
+                glib::idle_add_local_once(glib::clone!(
+                    #[weak]
+                    popup,
+                    move || popup.list_deferred_rows()
+                ));
+            }
+        ));
+        handler.replace(Some(id));
+    }
+
+    fn list_deferred_rows(&self) {
+        let deferred = self.deferred_rows.take();
+        if !deferred.is_empty() {
+            self.store.splice(self.store.n_items(), 0, &deferred);
+        }
     }
 
     fn build(app: &adw::Application, history: Rc<History>, config: Config) -> Self {
@@ -191,6 +232,8 @@ impl Popup {
             preview_timeout: RefCell::default(),
             preview_update: RefCell::default(),
             preview_dismissed: Cell::new(false),
+            deferred_rows: RefCell::default(),
+            first_frame_drawn: Cell::new(false),
         }
     }
 
@@ -377,10 +420,19 @@ impl Popup {
                 search::rank(&haystacks, &self.valid_query.borrow(), mode).unwrap_or((Vec::new(), mode))
             }
         };
-        let matches: Vec<glib::BoxedAnyObject> = ranked
+        let mut matches: Vec<glib::BoxedAnyObject> = ranked
             .into_iter()
             .map(|index| objects[index].clone())
             .collect();
+        // GTK builds a row for each of the first ~200 items, on screen or not.
+        // Building them all before the popup first shows delays it by about
+        // 40 ms, so until then only a screenful is listed.
+        let deferred = if self.first_frame_drawn.get() {
+            Vec::new()
+        } else {
+            matches.split_off(matches.len().min(INITIAL_ROWS))
+        };
+        self.deferred_rows.replace(deferred);
         // Rows bound by the splice highlight this query; rows GTK keeps bound are updated after.
         self.rows.query.replace(self.valid_query.borrow().clone());
         self.rows.mode.set(matched_mode);
