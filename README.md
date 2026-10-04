@@ -115,6 +115,12 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Ctrl+Alt+Shift+Delete | Clear all history, including pinned items |
 | Ctrl+, | Open preferences |
 | Esc | Close |
+| Ctrl+Q | Quit (also stops offering formatted text picked earlier) |
+
+Like Maccy's menu, the bottom of the popup has **Clear**, **Preferences…**,
+**About** and **Quit**. Click one, or press Tab until it's focused, then ↑ / ↓
+and Enter. Quit doesn't stop recording, which the extension and `laccyd` do;
+use **Pause Recording** for that.
 
 While you search, the matching text is highlighted. The **preview** shows
 the selected item in full next to the list: the whole text, the image at

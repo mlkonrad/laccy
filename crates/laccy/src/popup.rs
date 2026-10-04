@@ -39,6 +39,8 @@ pub struct Popup {
     stack: gtk::Stack,
     empty: adw::StatusPage,
     list: gtk::ListView,
+    /// Clear, Preferences…, About and Quit below the list, like Maccy's menu.
+    footer: gtk::ListBox,
     store: gio::ListStore,
     selection: gtk::SingleSelection,
     /// Shared with the rows, which load image thumbnails as they're shown.
@@ -91,6 +93,8 @@ impl Popup {
         popup.connect_signals();
         popup.reload();
         popup.check_extension();
+        // Otherwise GTK can start with the footer focused, where Enter would activate Clear.
+        popup.search.grab_focus();
         popup.window.present();
     }
 
@@ -141,6 +145,9 @@ impl Popup {
         content.append(&banner);
         content.append(&search);
         content.append(&stack);
+        content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        let footer = footer();
+        content.append(&footer);
 
         let preview = Preview::new();
         let columns = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -166,6 +173,7 @@ impl Popup {
             stack,
             empty,
             list,
+            footer,
             store,
             selection,
             history,
@@ -221,6 +229,18 @@ impl Popup {
             move |_, position| popup.pick(position, popup.config.paste_automatically, popup.config.paste_without_formatting)
         ));
 
+        self.footer.connect_row_activated(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_, row| match row.widget_name().as_str() {
+                "clear" => popup.confirm_clear(false),
+                "preferences" => popup.open_preferences(),
+                "about" => popup.show_about(),
+                "quit" => popup.quit(),
+                name => unreachable!("footer has no {name} row"),
+            }
+        ));
+
         // Like Maccy, clicking anywhere else dismisses the popup.
         self.window.connect_is_active_notify(glib::clone!(
             #[weak(rename_to = popup)]
@@ -272,6 +292,13 @@ impl Popup {
             return glib::Propagation::Proceed;
         }
         let mods = state & gtk::accelerator_get_default_mod_mask();
+        // In the footer, reached with Tab, arrows move between its rows and Enter
+        // activates one instead of picking the selected item.
+        if self.footer.focus_child().is_some()
+            && matches!(key, gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::Up | gdk::Key::Down)
+        {
+            return glib::Propagation::Proceed;
+        }
         let paste = self.config.paste_automatically;
         let plain = self.config.paste_without_formatting;
         match key {
@@ -298,6 +325,7 @@ impl Popup {
                 self.confirm_clear(true)
             }
             gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
+            gdk::Key::q | gdk::Key::Q if mods == Mod::CONTROL_MASK => self.quit(),
             // Maccy's default preview shortcut.
             gdk::Key::space if mods == Mod::CONTROL_MASK => self.toggle_preview(),
             _ if mods == Mod::CONTROL_MASK => match key.to_unicode().and_then(|c| c.to_digit(10)) {
@@ -545,6 +573,34 @@ impl Popup {
             crate::preferences::present(&app);
         }
         self.close();
+    }
+
+    fn show_about(self: &Rc<Self>) {
+        let dialog = adw::AboutDialog::builder()
+            .application_name("Laccy")
+            .application_icon("edit-paste-symbolic")
+            .comments("A lightweight clipboard manager for GNOME, inspired by Maccy")
+            .version(env!("CARGO_PKG_VERSION"))
+            .website("https://github.com/mlkonrad/laccy")
+            .license_type(gtk::License::MitX11)
+            .copyright("© 2026 The Laccy contributors")
+            .build();
+        dialog.connect_closed(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| popup.dialog_open.set(false)
+        ));
+        self.dialog_open.set(true);
+        dialog.present(Some(&self.window));
+    }
+
+    /// Exits laccy, which also stops offering formatted text it picked earlier.
+    /// Recording goes on: that's the extension and laccyd.
+    fn quit(&self) {
+        self.close();
+        if let Some(app) = self.window.application() {
+            app.quit();
+        }
     }
 
     /// Shows a banner when the extension isn't there to copy picked items.
@@ -816,6 +872,29 @@ impl Preview {
         self.last_copied.set_text(&item.map(|item| format_time(item.last_copied)).unwrap_or_default());
         self.copies.set_text(&item.map(|item| item.copy_count.to_string()).unwrap_or_default());
     }
+}
+
+/// The footer's rows, each named after what it does, with its shortcut.
+fn footer() -> gtk::ListBox {
+    let footer = gtk::ListBox::new();
+    footer.set_selection_mode(gtk::SelectionMode::None);
+    footer.add_css_class("navigation-sidebar");
+    for (name, title, shortcut) in [
+        ("clear", "Clear", "Ctrl+Shift+Delete"),
+        ("preferences", "Preferences…", "Ctrl+,"),
+        ("about", "About", ""),
+        ("quit", "Quit", "Ctrl+Q"),
+    ] {
+        let title = gtk::Label::builder().label(title).xalign(0.0).hexpand(true).build();
+        let shortcut = gtk::Label::new(Some(shortcut));
+        shortcut.add_css_class("dim-label");
+        let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row_box.append(&title);
+        row_box.append(&shortcut);
+        let row = gtk::ListBoxRow::builder().child(&row_box).name(name).build();
+        footer.append(&row);
+    }
+    footer
 }
 
 /// A local date and time for `millis` since the Unix epoch, in the locale's format.
