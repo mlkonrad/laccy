@@ -10,7 +10,7 @@ share any code with it.
 
 ## Status
 
-Early scaffold. It records and pastes text, images and files on GNOME 50 (Wayland).
+Early scaffold. It records and pastes text, images and files on GNOME 50 and 51 (Wayland).
 See the [roadmap](#roadmap).
 
 ## How it works
