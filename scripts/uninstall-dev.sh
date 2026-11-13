@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Removes what install-dev.sh installed. Clipboard history in
-# ~/.local/share/laccy and config in ~/.config/laccy are kept.
+# Removes what install-dev.sh installed. The clipboard history in
+# ~/.local/share/laccy and the settings in dconf are kept.
 set -euo pipefail
 
 bin_dir="$HOME/.local/bin"
@@ -16,4 +16,6 @@ rm -f "$bin_dir/laccy" "$bin_dir/laccyd" \
     "$data_dir/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg"
 rm -f "$data_dir/gnome-shell/extensions/$uuid"
 
-echo "Laccy uninstalled. Delete ~/.local/share/laccy to remove the clipboard history."
+echo "Laccy uninstalled. Your history and settings are kept. To remove them too:"
+echo "  rm -r ~/.local/share/laccy"
+echo "  dconf reset -f /org/gnome/shell/extensions/laccy/"

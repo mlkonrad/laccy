@@ -122,7 +122,7 @@ The extension and the app are installed separately: extensions.gnome.org only
 hosts the extension, never programs. If the app is missing, the extension
 records nothing, and opening Laccy shows a notice that links here.
 
-`scripts/uninstall-dev.sh` removes everything except your history.
+`scripts/uninstall-dev.sh` removes everything except your history and settings.
 
 Development:
 
@@ -130,6 +130,24 @@ Development:
 cargo test --workspace
 cargo clippy --workspace --all-targets
 journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
+```
+
+### Where your data lives
+
+Each user's history and settings stay in their own home folder, whichever way
+Laccy was installed:
+
+- **History** (text, images, files, pins and names): `~/.local/share/laccy/history.db`,
+  readable only by you (see Privacy above).
+- **Settings:** GNOME's settings database (dconf), under
+  `/org/gnome/shell/extensions/laccy/`.
+
+Uninstalling Laccy, with `dnf remove` or `scripts/uninstall-dev.sh`, keeps
+both. To remove them too:
+
+```sh
+rm -r ~/.local/share/laccy
+dconf reset -f /org/gnome/shell/extensions/laccy/
 ```
 
 ## Keyboard shortcuts
