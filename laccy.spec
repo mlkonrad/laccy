@@ -9,7 +9,7 @@
 %global debug_package %{nil}
 
 Name:           laccy
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Lightweight, keyboard-first clipboard manager for GNOME
 
@@ -99,5 +99,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mlkonrad.La
 %{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.laccy.gschema.xml
 
 %changelog
+* Sat Nov 14 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.1-1
+- Update the preview when a search changes the selected item
+- Disconnect the extension's dialog handlers when it is disabled
+
 * Fri Nov 13 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.0-1
 - First package
