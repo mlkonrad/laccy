@@ -8,9 +8,9 @@ use laccy_core::config::{
     PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, PREVIEW_AUTOMATICALLY_KEY, PREVIEW_DELAY_KEY,
     RECORD_FILES_KEY, RECORD_IMAGES_KEY,
     RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
-    SHOW_LATEST_COPY_KEY, SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
+    PIN_TO_KEY, SHOW_LATEST_COPY_KEY, SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
 };
-use laccy_core::history::SortOrder;
+use laccy_core::history::{PinPosition, SortOrder};
 use laccy_core::search;
 
 const WINDOW_NAME: &str = "laccy-preferences";
@@ -239,8 +239,23 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         }),
     );
     sort_row.set_title("Sort By");
-    sort_row.set_subtitle("Pinned items always stay at the top");
+    sort_row.set_subtitle("The order of items that aren't pinned");
     group.add(&sort_row);
+
+    let pin_row = choice_row(
+        settings,
+        PIN_TO_KEY,
+        PinPosition::ALL.map(|position| {
+            let label = match position {
+                PinPosition::Top => "Top",
+                PinPosition::Bottom => "Bottom",
+            };
+            (position.name(), label)
+        }),
+    );
+    pin_row.set_title("Pinned Items");
+    pin_row.set_subtitle("Where pinned items are listed");
+    group.add(&pin_row);
 
     for (key, title) in [(RECORD_TEXT_KEY, "Save Text"), (RECORD_IMAGES_KEY, "Save Images"), (RECORD_FILES_KEY, "Save Files")] {
         let row = adw::SwitchRow::builder().title(title).build();

@@ -44,7 +44,8 @@ impl Kind {
     }
 }
 
-/// The order of unpinned items. Pinned items always come first, in the order they were pinned.
+/// The order of unpinned items. Pinned items stay together, in the order they
+/// were pinned, at the [`PinPosition`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SortOrder {
     /// Most recently copied first.
@@ -79,6 +80,33 @@ impl SortOrder {
             Self::FirstCopied => "first_copied DESC, last_copied DESC",
             Self::CopyCount => "copy_count DESC, last_copied DESC",
         }
+    }
+}
+
+/// Where pinned items are listed, like Maccy's "Pin to" setting.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PinPosition {
+    /// Above the other items.
+    #[default]
+    Top,
+    /// Below the other items.
+    Bottom,
+}
+
+impl PinPosition {
+    /// Every position, in the order the preferences window lists them.
+    pub const ALL: [Self; 2] = [Self::Top, Self::Bottom];
+
+    /// The position's value in GSettings.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|position| position.name() == name)
     }
 }
 
@@ -263,14 +291,18 @@ impl History {
         Ok(())
     }
 
-    /// All items: pinned ones first in the order they were pinned, then the
-    /// rest in `order`.
-    pub fn items(&self, order: SortOrder) -> Result<Vec<Item>> {
+    /// All items: pinned ones in the order they were pinned, above or below
+    /// the rest as `pins` says, and the rest in `order`.
+    pub fn items(&self, order: SortOrder, pins: PinPosition) -> Result<Vec<Item>> {
+        let pins_first = match pins {
+            PinPosition::Top => "ASC",
+            PinPosition::Bottom => "DESC",
+        };
         let mut stmt = self.conn.prepare(&format!(
             "SELECT id, kind, substr(text, 1, ?1), source_app, pinned_at IS NOT NULL, first_copied, last_copied, copy_count,
                     pin_key
              FROM items
-             ORDER BY pinned_at IS NULL, pinned_at, {}",
+             ORDER BY pinned_at IS NULL {pins_first}, pinned_at, {}",
             order.order_by()
         ))?;
         stmt.query_map(params![EXCERPT_CHARS as i64], |row| {
@@ -472,7 +504,7 @@ mod tests {
     }
 
     fn texts(history: &History) -> Vec<String> {
-        history.items(SortOrder::LastCopied).unwrap().into_iter().map(|item| item.excerpt).collect()
+        history.items(SortOrder::LastCopied, PinPosition::Top).unwrap().into_iter().map(|item| item.excerpt).collect()
     }
 
     #[test]
@@ -512,11 +544,11 @@ mod tests {
         history.add(&text("two"), None, 10).unwrap();
         history.add(&text("one"), None, 10).unwrap();
         assert_eq!(texts(&history), ["one", "two"]);
-        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].source_app.as_deref(), Some("a.desktop"));
+        assert_eq!(history.items(SortOrder::LastCopied, PinPosition::Top).unwrap()[0].source_app.as_deref(), Some("a.desktop"));
     }
 
     #[test]
-    fn sort_orders_keep_pinned_items_first() {
+    fn sort_orders_keep_pinned_items_together() {
         let mut history = History::open_in_memory().unwrap();
         for item in ["a", "b", "c", "b", "b", "c", "a"] {
             history.add(&text(item), None, 10).unwrap();
@@ -525,14 +557,22 @@ mod tests {
         history.set_pinned(pinned, true).unwrap();
 
         let sorted = |order| -> Vec<String> {
-            history.items(order).unwrap().into_iter().map(|item| item.excerpt).collect()
+            history.items(order, PinPosition::Top).unwrap().into_iter().map(|item| item.excerpt).collect()
         };
         assert_eq!(sorted(SortOrder::LastCopied), ["pinned", "a", "c", "b"]);
         assert_eq!(sorted(SortOrder::FirstCopied), ["pinned", "c", "b", "a"]);
         // b was copied 3 times; a and c twice, and a more recently.
         assert_eq!(sorted(SortOrder::CopyCount), ["pinned", "b", "a", "c"]);
 
-        let b = &history.items(SortOrder::CopyCount).unwrap()[1];
+        let at_bottom: Vec<String> = history
+            .items(SortOrder::LastCopied, PinPosition::Bottom)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.excerpt)
+            .collect();
+        assert_eq!(at_bottom, ["a", "c", "b", "pinned"]);
+
+        let b = &history.items(SortOrder::CopyCount, PinPosition::Top).unwrap()[1];
         assert_eq!(b.copy_count, 3);
         assert!(b.first_copied < b.last_copied);
     }
@@ -587,7 +627,7 @@ mod tests {
         let mut history = History::open_in_memory().unwrap();
         let long = "é".repeat(EXCERPT_CHARS + 5);
         let id = history.add(&text(&long), None, 10).unwrap();
-        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].excerpt.chars().count(), EXCERPT_CHARS);
+        assert_eq!(history.items(SortOrder::LastCopied, PinPosition::Top).unwrap()[0].excerpt.chars().count(), EXCERPT_CHARS);
         assert_eq!(history.content(id).unwrap(), Some(text(&long)));
     }
 
@@ -598,7 +638,7 @@ mod tests {
         let files_id = history.add(&files, None, 10).unwrap();
         let image_id = history.add(&image(b"\x89PNG pixels"), None, 10).unwrap();
 
-        let items = history.items(SortOrder::LastCopied).unwrap();
+        let items = history.items(SortOrder::LastCopied, PinPosition::Top).unwrap();
         assert_eq!((items[0].kind, items[0].excerpt.as_str()), (Kind::Image, ""));
         assert_eq!((items[1].kind, items[1].excerpt.as_str()), (Kind::Files, "file:///a%20b\nfile:///c"));
         assert_eq!(history.content(files_id).unwrap(), Some(files));
@@ -617,8 +657,8 @@ mod tests {
         history.add(&text("file:///a"), None, 10).unwrap();
         history.add(&Content::Files(vec!["file:///a".to_owned()]), None, 10).unwrap();
         assert_eq!(history.add(&image(b"a"), None, 10).unwrap(), a);
-        assert_eq!(history.items(SortOrder::LastCopied).unwrap().len(), 4);
-        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].id, a);
+        assert_eq!(history.items(SortOrder::LastCopied, PinPosition::Top).unwrap().len(), 4);
+        assert_eq!(history.items(SortOrder::LastCopied, PinPosition::Top).unwrap()[0].id, a);
     }
 
     #[test]
@@ -628,7 +668,7 @@ mod tests {
         history.add(&text("second"), None, 10).unwrap();
         history.touch(first).unwrap();
         assert_eq!(texts(&history), ["first", "second"]);
-        assert_eq!(history.items(SortOrder::LastCopied).unwrap()[0].source_app.as_deref(), Some("a.desktop"));
+        assert_eq!(history.items(SortOrder::LastCopied, PinPosition::Top).unwrap()[0].source_app.as_deref(), Some("a.desktop"));
     }
 
     #[test]
@@ -675,7 +715,7 @@ mod tests {
             .unwrap();
         }
         let mut history = History::open(&path).unwrap();
-        let items = history.items(SortOrder::LastCopied).unwrap();
+        let items = history.items(SortOrder::LastCopied, PinPosition::Top).unwrap();
         assert_eq!((items[0].kind, items[0].excerpt.as_str()), (Kind::Text, "old"));
         // The old row's hash still finds it.
         assert_eq!(history.add(&text("old"), None, 10).unwrap(), items[0].id);
@@ -687,7 +727,7 @@ mod tests {
     /// Each item's key, by text: pins made within a millisecond have no set order.
     fn pin_keys(history: &History) -> Vec<(String, Option<char>)> {
         let mut keys: Vec<_> =
-            history.items(SortOrder::LastCopied).unwrap().into_iter().map(|item| (item.excerpt, item.pin_key)).collect();
+            history.items(SortOrder::LastCopied, PinPosition::Top).unwrap().into_iter().map(|item| (item.excerpt, item.pin_key)).collect();
         keys.sort();
         keys
     }

@@ -73,7 +73,16 @@
       </choices>
       <default>'last-copied'</default>
       <summary>Sort by</summary>
-      <description>The order of unpinned items: most recently copied first, most recently first copied first, or most copied first. Pinned items always stay at the top.</description>
+      <description>The order of unpinned items: most recently copied first, most recently first copied first, or most copied first. Pinned items stay together, see pin-to.</description>
+    </key>
+    <key name="pin-to" type="s">
+      <choices>
+        <choice value="top"/>
+        <choice value="bottom"/>
+      </choices>
+      <default>'top'</default>
+      <summary>Pin to</summary>
+      <description>Whether pinned items are listed above or below the other items, in the order they were pinned.</description>
     </key>
     <key name="highlight-matches" type="s">
       <choices>

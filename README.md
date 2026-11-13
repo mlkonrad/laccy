@@ -109,7 +109,7 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Alt+Shift+Enter | Paste the item with the opposite of Paste Without Formatting: as plain text, unless that's on |
 | Ctrl+1 … Ctrl+9 | Pick the first nine unpinned items |
 | Ctrl+B, Ctrl+D, … | Pick a pinned item by the key shown on its row |
-| Alt+P | Pin or unpin (pinned items stay at the top) |
+| Alt+P | Pin or unpin (pinned items stay at the top, or the bottom if you choose) |
 | Alt+Delete | Delete the item |
 | Ctrl+Space | Show or hide the preview |
 | Ctrl+Shift+Delete | Clear unpinned history |
@@ -177,7 +177,8 @@ Preview:
 History:
 
 - **History Size:** unpinned items to keep (200 by default).
-- **Sort By:** Last Copied, First Copied or Number of Copies (Last Copied by default). Pinned items always stay at the top.
+- **Sort By:** Last Copied, First Copied or Number of Copies (Last Copied by default), for items that aren't pinned.
+- **Pinned Items:** list pinned items at the Top or the Bottom, in the order you pinned them (Top by default).
 - **Save Text, Save Images, Save Files:** which kinds of copies are recorded (all on by default).
 - **Ignored Apps:** apps whose copies are never recorded.
 - **Ignored Patterns:** regular expressions; text copies, and file copies by their paths, that match one are never recorded. Patterns are case-sensitive unless they start with `(?i)`, so `(?i)^sk-` skips keys starting with `sk-` or `SK-`.

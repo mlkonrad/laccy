@@ -8,7 +8,7 @@ use std::time::Duration;
 use gio::glib;
 use gio::prelude::*;
 
-use crate::history::{Content, Format, SortOrder};
+use crate::history::{Content, Format, PinPosition, SortOrder};
 use crate::{FORMAT_MIME_TYPES, files, search};
 
 pub const SCHEMA_ID: &str = "org.gnome.shell.extensions.laccy";
@@ -31,6 +31,7 @@ pub const MAX_ITEM_BYTES_KEY: &str = "max-item-bytes";
 pub const MAX_IMAGE_BYTES_KEY: &str = "max-image-bytes";
 pub const SEARCH_MODE_KEY: &str = "search-mode";
 pub const SORT_BY_KEY: &str = "sort-by";
+pub const PIN_TO_KEY: &str = "pin-to";
 pub const HIGHLIGHT_MATCHES_KEY: &str = "highlight-matches";
 pub const SHOW_SPECIAL_SYMBOLS_KEY: &str = "show-special-symbols";
 pub const SHOW_COLOR_SWATCHES_KEY: &str = "show-color-swatches";
@@ -97,6 +98,8 @@ pub struct Config {
     pub search_mode: search::Mode,
     /// The order of unpinned items.
     pub sort_by: SortOrder,
+    /// Whether pinned items are listed above or below the others.
+    pub pin_to: PinPosition,
     /// How the popup marks the text a search matched.
     pub highlight_matches: Highlight,
     /// Show whitespace as symbols in the popup, see [`crate::display_text`].
@@ -127,6 +130,7 @@ impl Default for Config {
             max_image_bytes: 10 * 1024 * 1024,
             search_mode: search::Mode::Exact,
             sort_by: SortOrder::LastCopied,
+            pin_to: PinPosition::Top,
             highlight_matches: Highlight::Bold,
             show_special_symbols: true,
             show_color_swatches: true,
@@ -157,6 +161,7 @@ impl Config {
             max_image_bytes: settings.uint(MAX_IMAGE_BYTES_KEY) as usize,
             search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
             sort_by: SortOrder::from_name(&settings.string(SORT_BY_KEY)).unwrap_or_default(),
+            pin_to: PinPosition::from_name(&settings.string(PIN_TO_KEY)).unwrap_or_default(),
             highlight_matches: Highlight::from_name(&settings.string(HIGHLIGHT_MATCHES_KEY)).unwrap_or_default(),
             show_special_symbols: settings.boolean(SHOW_SPECIAL_SYMBOLS_KEY),
             show_color_swatches: settings.boolean(SHOW_COLOR_SWATCHES_KEY),
@@ -448,6 +453,15 @@ mod tests {
         for order in SortOrder::ALL {
             settings.set_string(SORT_BY_KEY, order.name()).unwrap();
             assert_eq!(Config::from_settings(&settings).sort_by, order);
+        }
+    }
+
+    #[test]
+    fn schema_lists_every_pin_position() {
+        let settings = test_settings();
+        for position in PinPosition::ALL {
+            settings.set_string(PIN_TO_KEY, position.name()).unwrap();
+            assert_eq!(Config::from_settings(&settings).pin_to, position);
         }
     }
 }
