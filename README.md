@@ -9,6 +9,10 @@ A lightweight, keyboard-first clipboard manager for GNOME, inspired by
 bar (or press a shortcut you set in [Preferences](#preferences)), type to
 search, press **Enter** to copy, then paste wherever you like.
 
+![The Laccy popup with a pinned snippet, recent copies and an image in the preview, next to the preferences window](data/screenshots/hero.png)
+
+![Searching the history for "git" in the Laccy popup, with the first match in the preview](data/screenshots/search.png)
+
 Laccy is an independent project. It is not affiliated with Maccy and doesn't
 share any code with it.
 
