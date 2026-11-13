@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="data/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg" width="128" height="128" alt="Laccy icon: two penguins on a clipboard, one a copy of the other">
+  <img src="data/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg" width="128" height="128" alt="Laccy icon: a clipboard">
 </p>
 
 # Laccy
