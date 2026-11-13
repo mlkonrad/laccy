@@ -25,8 +25,14 @@ if [ -f "$data_dir/icons/hicolor/icon-theme.cache" ]; then
 fi
 
 # The extension is symlinked, so edits to its JS apply after re-logging in.
+ext_dir="$data_dir/gnome-shell/extensions/$uuid"
 glib-compile-schemas "$root/extension/$uuid/schemas"
-ln -sfn "$root/extension/$uuid" "$data_dir/gnome-shell/extensions/$uuid"
+# A real folder is the extension from extensions.gnome.org; keep using it.
+if [ -d "$ext_dir" ] && [ ! -L "$ext_dir" ]; then
+    echo "Keeping the extension installed from extensions.gnome.org."
+else
+    ln -sfn "$root/extension/$uuid" "$ext_dir"
+fi
 
 # Restart the daemon on the new binary; D-Bus activation starts it again on the next copy.
 pkill -x laccyd || true

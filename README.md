@@ -110,6 +110,8 @@ To build from source instead (requirements on Fedora:
 `sudo dnf install cargo rust gtk4-devel libadwaita-devel`):
 
 ```sh
+git clone https://github.com/mlkonrad/laccy.git
+cd laccy
 scripts/install-dev.sh     # builds, installs into ~/.local, links the extension
 ```
 
