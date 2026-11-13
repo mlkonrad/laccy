@@ -823,7 +823,7 @@ impl Popup {
     fn show_about(self: &Rc<Self>) {
         let dialog = adw::AboutDialog::builder()
             .application_name("Laccy")
-            .application_icon("edit-paste-symbolic")
+            .application_icon("io.github.mlkonrad.Laccy")
             .comments("A lightweight clipboard manager for GNOME, inspired by Maccy")
             .version(env!("CARGO_PKG_VERSION"))
             .website("https://github.com/mlkonrad/laccy")

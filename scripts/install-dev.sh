@@ -16,6 +16,13 @@ sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.mlkonrad.Laccy.desktop.in" \
     > "$data_dir/applications/io.github.mlkonrad.Laccy.desktop"
 sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.mlkonrad.Laccy.Daemon.service.in" \
     > "$data_dir/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service"
+install -Dm644 "$root/data/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg" \
+    "$data_dir/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg"
+# Refresh the user icon cache if one exists, or the new icon stays hidden behind it.
+if [ -f "$data_dir/icons/hicolor/icon-theme.cache" ]; then
+    gtk4-update-icon-cache -qtf "$data_dir/icons/hicolor" 2>/dev/null \
+        || gtk-update-icon-cache -qtf "$data_dir/icons/hicolor" 2>/dev/null || true
+fi
 
 # The extension is symlinked, so edits to its JS apply after re-logging in.
 glib-compile-schemas "$root/extension/$uuid/schemas"

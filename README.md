@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="data/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg" width="128" height="128" alt="Laccy icon: two penguins on a clipboard, one a copy of the other">
+</p>
+
 # Laccy
 
 A lightweight, keyboard-first clipboard manager for GNOME, inspired by
@@ -226,7 +230,8 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Pause recording, ignore next copy, ignored patterns, and choosing which kinds of copies are saved
 - [x] Sort order, preview, highlighted matches, special symbols, color swatches, app icons
 - [x] Clear all history, latest copy in the top bar
-- [ ] App icon, Flatpak/RPM packaging, extensions.gnome.org release
+- [x] App icon
+- [ ] Flatpak/RPM packaging, extensions.gnome.org release
 
 ## License
 

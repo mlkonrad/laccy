@@ -12,7 +12,8 @@ pkill -x laccyd || true
 
 rm -f "$bin_dir/laccy" "$bin_dir/laccyd" \
     "$data_dir/applications/io.github.mlkonrad.Laccy.desktop" \
-    "$data_dir/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service"
+    "$data_dir/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service" \
+    "$data_dir/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg"
 rm -f "$data_dir/gnome-shell/extensions/$uuid"
 
 echo "Laccy uninstalled. Delete ~/.local/share/laccy to remove the clipboard history."
