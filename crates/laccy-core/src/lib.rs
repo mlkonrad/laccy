@@ -28,6 +28,31 @@ pub fn thumbnail_size(width: i32, height: i32) -> (i32, i32) {
     (scaled(width), scaled(height))
 }
 
+/// The image formats recorded, most preferred first. Anything else an app
+/// copies would reach a rarely used image loader, some of which (like XPM's)
+/// still run outside glycin's sandbox. The extension has its own copy of this list.
+pub const IMAGE_MIME_TYPES: [&str; 6] = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/tiff"];
+
+/// Whether `data` starts like an image in `mime_type`, one of
+/// [`IMAGE_MIME_TYPES`]. Image loaders (glycin's too) pick a decoder from the
+/// data, not from the type it was copied as, so the type alone keeps nothing out.
+pub fn is_image_of_type(mime_type: &str, data: &[u8]) -> bool {
+    match mime_type {
+        "image/png" => data.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" => data.starts_with(&[0xff, 0xd8, 0xff]),
+        "image/gif" => data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a"),
+        "image/webp" => data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP",
+        "image/bmp" => data.starts_with(b"BM"),
+        "image/tiff" => data.starts_with(b"II*\0") || data.starts_with(b"MM\0*"),
+        _ => false,
+    }
+}
+
+/// Images with more pixels than this are not recorded. A small file can
+/// declare a huge image that takes gigabytes to decode; this is about
+/// 100 megapixels, more than three 8K screens.
+pub const MAX_IMAGE_PIXELS: i64 = 100_000_000;
+
 /// Exported by `laccyd`, which the extension calls for every clipboard change.
 pub const DAEMON_BUS_NAME: &str = "io.github.mlkonrad.Laccy.Daemon";
 pub const DAEMON_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Daemon";
@@ -227,6 +252,20 @@ mod tests {
         assert_eq!(hex_color("#ggg"), None);
         assert_eq!(hex_color("#fff is white"), None);
         assert_eq!(hex_color("#éé"), None);
+    }
+
+    #[test]
+    fn images_must_start_like_their_type() {
+        use super::{IMAGE_MIME_TYPES, is_image_of_type};
+        assert!(is_image_of_type("image/png", b"\x89PNG\r\n\x1a\nrest"));
+        assert!(is_image_of_type("image/jpeg", b"\xff\xd8\xff\xe0"));
+        assert!(is_image_of_type("image/webp", b"RIFF\0\0\0\0WEBPVP8 "));
+        assert!(!is_image_of_type("image/webp", b"RIFF\0\0\0\0WAVE"));
+        assert!(!is_image_of_type("image/png", b"/* XPM */"));
+        assert!(!is_image_of_type("image/x-xpixmap", b"/* XPM */"));
+        for mime_type in IMAGE_MIME_TYPES {
+            assert!(!is_image_of_type(mime_type, b""), "{mime_type}");
+        }
     }
 
     #[test]

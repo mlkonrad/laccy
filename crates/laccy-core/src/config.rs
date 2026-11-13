@@ -209,8 +209,7 @@ impl Config {
             }
             Content::Image { mime_type, data } => {
                 self.record_images
-                    && mime_type.starts_with("image/")
-                    && !data.is_empty()
+                    && crate::is_image_of_type(mime_type, data)
                     && data.len() <= self.max_image_bytes
             }
         }
@@ -351,7 +350,7 @@ mod tests {
     fn records_only_acceptable_copies() {
         let config = Config {
             max_item_bytes: 20,
-            max_image_bytes: 4,
+            max_image_bytes: 8,
             ignored_apps: vec!["secret.desktop".to_owned()],
             ..Config::default()
         };
@@ -369,17 +368,21 @@ mod tests {
         assert!(!config.should_record(&files(&["file:///a", "https://example.com/"]), ""));
         assert!(!config.should_record(&files(&["file:///aaaaaaaaaa", "file:///bbbbbbbbbb"]), ""));
 
-        assert!(config.should_record(&image("image/png", b"1234"), ""));
+        assert!(config.should_record(&image("image/png", b"\x89PNG\r\n\x1a\n"), ""));
         assert!(!config.should_record(&image("image/png", b""), ""));
-        assert!(!config.should_record(&image("image/png", b"12345"), ""));
-        assert!(!config.should_record(&image("text/html", b"1234"), ""));
+        assert!(!config.should_record(&image("image/png", b"\x89PNG\r\n\x1a\n1"), ""));
+        assert!(!config.should_record(&image("text/html", b"\x89PNG\r\n\x1a\n"), ""));
+        // Only common formats, and only data that starts like the format it claims.
+        assert!(config.should_record(&image("image/jpeg", b"\xff\xd8\xff"), ""));
+        assert!(!config.should_record(&image("image/png", b"/* XPM */"), ""));
+        assert!(!config.should_record(&image("image/x-xpixmap", b"/* XPM */"), ""));
     }
 
     #[test]
     fn records_only_enabled_kinds() {
         let text = Content::Text("hello".to_owned());
         let files = Content::Files(vec!["file:///a".to_owned()]);
-        let image = Content::Image { mime_type: "image/png".to_owned(), data: b"1234".to_vec() };
+        let image = Content::Image { mime_type: "image/png".to_owned(), data: b"\x89PNG\r\n\x1a\n".to_vec() };
 
         let config = Config { record_text: false, ..Config::default() };
         assert!(!config.should_record(&text, ""));

@@ -197,12 +197,11 @@ pub struct History {
 const WAL_SIZE_LIMIT: i64 = 1024 * 1024;
 
 impl History {
-    /// Opens the history at its default location, creating the directory if needed.
+    /// Opens the history at its default location, creating the directory if
+    /// needed. Only the user may read it, see [`make_private`].
     pub fn open_default() -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let path = crate::history_path();
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
+        make_private(&path)?;
         Ok(Self::open(&path)?)
     }
 
@@ -525,6 +524,33 @@ impl History {
     }
 }
 
+/// Copies can hold passwords and other secrets, but with the usual umask the
+/// directory would be created 0755 and the files 0644, readable by every
+/// account on the computer unless the home directory happens to be closed.
+/// This makes the directory 0700 and the database 0600, also fixing files
+/// from before. SQLite gives the -wal and -shm files it creates the mode of
+/// the database, and those already there are fixed here too.
+fn make_private(path: &Path) -> std::io::Result<()> {
+    use std::fs::{DirBuilder, OpenOptions, Permissions};
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+
+    if let Some(dir) = path.parent() {
+        DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        std::fs::set_permissions(dir, Permissions::from_mode(0o700))?;
+    }
+    // Created here, not by SQLite, so it never exists with a wider mode.
+    OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path)?;
+    for suffix in ["", "-wal", "-shm"] {
+        let mut file = path.as_os_str().to_owned();
+        file.push(suffix);
+        match std::fs::set_permissions(&file, Permissions::from_mode(0o600)) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            result => result?,
+        }
+    }
+    Ok(())
+}
+
 /// Gives pinned items without a key the free keys from [`PIN_KEYS`], earliest
 /// pinned first, until they run out.
 fn assign_missing_pin_keys(tx: &Transaction) -> Result<()> {
@@ -836,6 +862,31 @@ mod tests {
         drop(history);
         assert!(!contains(b"leftover-7e1b"));
         assert_eq!(texts(&History::open(&path).unwrap()), ["kept"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn history_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, _) = temp_db("private");
+        let laccy_dir = dir.join("laccy");
+        let path = laccy_dir.join("history.db");
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        // A directory and log left world-readable by an older version.
+        std::fs::create_dir_all(&laccy_dir).unwrap();
+        std::fs::set_permissions(&laccy_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(path.with_extension("db-wal"), b"").unwrap();
+        std::fs::set_permissions(path.with_extension("db-wal"), std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        make_private(&path).unwrap();
+        let mut history = History::open(&path).unwrap();
+        history.add(&text("secret"), None, 10).unwrap();
+        assert_eq!(mode(&laccy_dir), 0o700);
+        for suffix in ["db", "db-wal", "db-shm"] {
+            assert_eq!(mode(&path.with_extension(suffix)), 0o600, "{suffix}");
+        }
+        drop(history);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

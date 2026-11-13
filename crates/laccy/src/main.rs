@@ -14,7 +14,7 @@ use gtk::{gio, glib};
 fn main() -> glib::ExitCode {
     // Run by laccyd for copied images; needs no display.
     if std::env::args_os().nth(1).is_some_and(|arg| arg == "--thumbnail") {
-        return thumbnail::run();
+        return thumbnail::run(std::env::args().nth(2).as_deref());
     }
 
     // A short list doesn't need the GPU. With Cairo the popup uses about a

@@ -1122,12 +1122,14 @@ impl Preview {
             Some(Content::Files(uris)) => {
                 (Some(uris.iter().map(|uri| files::display_path(uri)).collect::<Vec<_>>().join("\n")), None)
             }
-            Some(Content::Image { data, .. }) => (
+            // Checked again for items recorded before laccyd checked images.
+            Some(Content::Image { mime_type, data }) if laccy_core::is_image_of_type(&mime_type, &data) => (
                 None,
                 gdk::Texture::from_bytes(&glib::Bytes::from_owned(data))
                     .inspect_err(|err| eprintln!("laccy: cannot load image: {err}"))
                     .ok(),
             ),
+            Some(Content::Image { .. }) => (None, None),
             None => (None, None),
         };
         self.text_scroll.set_visible(texture.is_none());

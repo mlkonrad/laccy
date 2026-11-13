@@ -72,12 +72,22 @@ You can also pause recording, or skip just the next copy, from the
 screen is locked, because GNOME disables extensions then. History never
 leaves your machine. Deleted and cleared items are overwritten with zeros in
 the history file (SQLite's `secure_delete`), so they can't be recovered from
-it afterwards.
+it afterwards. The history file and its folder can only be read by you
+(modes 0600 and 0700).
+
+**Security:** any program on the session bus can call D-Bus methods, so each
+side checks who is calling. laccyd only answers GNOME Shell (the owner of
+`org.gnome.Shell`), so other programs can't add fake items, read the latest
+copy or clear the history. The extension only sets the clipboard or pastes
+for a process running the `laccy` binary that Laccy's desktop file launches,
+so other programs can't use it to replace what you copied or type into
+the focused app.
 
 ## Images, files and formatted text
 
 - **Files** copied in Files (or any app that copies a list of `file://` URIs) are recorded as files. Picking them copies the files again, so you can paste them into a folder or an upload dialog. Search matches their paths.
 - **Images** (screenshots, *Copy Image* in a browser) are recorded when the app offers an image and no text. Apps that offer text next to an image, like spreadsheets, are recorded as text. Images have no text to search, so they only show while the search is empty.
+- Images are recorded as PNG, JPEG, GIF, WebP, BMP or TIFF, and only if the data really is in that format: other formats would reach rarely used image decoders. Images over 100 megapixels aren't recorded either, since a small file can take gigabytes to decode.
 - Images larger than 10 MB aren't recorded. Change the limit, in bytes, with the `max-image-bytes` setting (see [Preferences](#preferences)).
 - **Formatted text** (bold, links, lists or tables copied from documents, web pages and mail) keeps its HTML and RTF next to the plain text, each up to the `max-item-bytes` limit (1 MB). Picking it pastes the formatting too; **Alt+Shift+Enter** or the **Paste Without Formatting** preference picks the plain text. Apps' own formats, like LibreOffice's, aren't kept, so copies between LibreOffice documents can lose some styling.
 - GNOME Shell extensions can only put one format on the clipboard, and GNOME keeps only the plain text when an app that copied something quits. So after you pick formatted text, `laccy` keeps offering it, without a window, until something else is copied, then exits. Meanwhile it uses about 11 MB of private memory (53 MB resident, mostly shared libraries).

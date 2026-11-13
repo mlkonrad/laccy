@@ -9,7 +9,7 @@ use gio::glib;
 use gio::prelude::*;
 use laccy_core::config::{self, Config};
 use laccy_core::history::{Content, Format, History};
-use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL};
+use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, SHELL_BUS_NAME};
 
 const INTROSPECTION: &str = r#"
 <node>
@@ -86,9 +86,15 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
     let node = gio::DBusNodeInfo::for_xml(INTROSPECTION).expect("introspection XML is valid");
     let interface = node.lookup_interface(DAEMON_INTERFACE).expect("interface is in the XML");
 
+    let shell = RefCell::new(None);
     let registration = connection
         .register_object(DAEMON_OBJECT_PATH, &interface)
-        .method_call(move |connection, _, _, _, method, params, invocation| {
+        .method_call(move |connection, sender, _, _, method, params, invocation| {
+            if !is_from_shell(&connection, &shell, sender) {
+                eprintln!("laccyd: refused {method} from {}, which is not GNOME Shell", sender.unwrap_or("?"));
+                invocation.return_dbus_error("org.freedesktop.DBus.Error.AccessDenied", "Only GNOME Shell may call laccyd");
+                return;
+            }
             // GDBus has already checked the method and its argument types against the XML.
             if method == "Clear" {
                 let include_pinned = params.get::<(bool,)>().is_some_and(|(include_pinned,)| include_pinned);
@@ -156,6 +162,39 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
     }
 }
 
+/// Whether `sender` is GNOME Shell, where the extension runs. Every program on
+/// the session bus, sandboxed apps with bus access included, can call laccyd;
+/// without this one could slip fake copies into the history for the user to
+/// paste, read the latest copy, or wipe the history. `shell` caches the
+/// shell's unique name, so the bus is only asked again when it doesn't match:
+/// after a shell restart, or for a caller that is refused anyway.
+fn is_from_shell(connection: &gio::DBusConnection, shell: &RefCell<Option<String>>, sender: Option<&str>) -> bool {
+    let Some(sender) = sender else {
+        return false;
+    };
+    if shell.borrow().as_deref() == Some(sender) {
+        return true;
+    }
+    let owner = connection
+        .call_sync(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "GetNameOwner",
+            Some(&(SHELL_BUS_NAME,).to_variant()),
+            Some(glib::VariantTy::new("(s)").expect("valid type")),
+            gio::DBusCallFlags::NONE,
+            1000,
+            gio::Cancellable::NONE,
+        )
+        .ok()
+        .and_then(|reply| reply.get::<(String,)>())
+        .map(|(owner,)| owner);
+    let allowed = owner.as_deref() == Some(sender);
+    shell.replace(owner);
+    allowed
+}
+
 /// Tells open popups (and the extension) that the history changed.
 fn announce_change(connection: &gio::DBusConnection) {
     if let Err(err) = connection.emit_signal(None, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, HISTORY_CHANGED_SIGNAL, None) {
@@ -208,7 +247,7 @@ async fn record(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Made before storing, so images the popup couldn't show are never recorded.
     let thumbnail = match &content {
-        Content::Image { data, .. } => Some(thumbnail(data).await?),
+        Content::Image { mime_type, data } => Some(thumbnail(mime_type, data).await?),
         _ => None,
     };
     let source_app = (!source_app.is_empty()).then_some(source_app);
@@ -224,16 +263,25 @@ async fn record(
     Ok(())
 }
 
+/// How long `laccy --thumbnail` may take. Even a 100-megapixel image takes
+/// about a second; an image crafted to hang its decoder is given up on.
+const THUMBNAIL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// A PNG thumbnail of the image in `data`, made by `laccy --thumbnail`. The
-/// image libraries keep memory after decoding, so they never load in this
-/// long-running process.
-async fn thumbnail(data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+/// image libraries keep memory after decoding, and copied images are
+/// untrusted input, so they never load in this long-running process.
+async fn thumbnail(mime_type: &str, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let laccy = std::env::current_exe()?.with_file_name("laccy");
     let process = gio::Subprocess::newv(
-        &[laccy.as_os_str(), OsStr::new("--thumbnail")],
+        &[laccy.as_os_str(), OsStr::new("--thumbnail"), OsStr::new(mime_type)],
         gio::SubprocessFlags::STDIN_PIPE | gio::SubprocessFlags::STDOUT_PIPE,
     )?;
-    let (png, _) = process.communicate_future(Some(&glib::Bytes::from(data))).await?;
+    let communicate = process.communicate_future(Some(&glib::Bytes::from(data)));
+    let Ok(result) = glib::future_with_timeout(THUMBNAIL_TIMEOUT, communicate).await else {
+        process.force_exit();
+        return Err(format!("{} took too long to make a thumbnail", laccy.display()).into());
+    };
+    let (png, _) = result?;
     match png {
         Some(png) if process.is_successful() && !png.is_empty() => Ok(png.to_vec()),
         _ => Err(format!("{} could not make a thumbnail", laccy.display()).into()),

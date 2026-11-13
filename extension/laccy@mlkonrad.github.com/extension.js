@@ -52,6 +52,8 @@ const SHELL_INTERFACE_XML = `
 
 // Password managers (KeePassXC, KDE apps) mark copied secrets with this type.
 const SECRET_MIME_TYPE = 'x-kde-passwordManagerHint';
+// The image formats recorded, most preferred first (IMAGE_MIME_TYPES in laccy-core).
+const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff'];
 // Copied files, as file:// URIs.
 const URI_LIST_MIME_TYPE = 'text/uri-list';
 // The types St.Clipboard.get_text() reads.
@@ -70,9 +72,9 @@ const PASTE_WAIT_MS = 5000;
 const HELD_KEYS_MASK = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK |
     Clutter.ModifierType.SUPER_MASK | Clutter.ModifierType.HYPER_MASK | Clutter.ModifierType.META_MASK;
 
-// Any program on the session bus can call SetClipboard. To keep that from
-// becoming a way to type into other apps, pasting is only allowed once, and
-// only within this long after the user opened the popup with the shortcut.
+// Only laccy may call SetClipboard (see _fromLaccy). On top of that, pasting
+// is only allowed once, and only within this long after the user opened the
+// popup with the shortcut.
 const PASTE_ALLOWED_US = 2 * 60 * GLib.USEC_PER_SEC;
 
 // A popup closed before GNOME saw it activated leaves a startup notice, and the
@@ -100,6 +102,22 @@ const HISTORY_CHANGED_SIGNAL = 'HistoryChanged';
 const INDICATOR_ICON = 'edit-paste-symbolic';
 // The icon's opacity while recording is paused.
 const PAUSED_OPACITY = 128;
+
+// The device and inode of the file at `path`, following links, as one
+// string; null if it can't be read.
+function fileIdentity(path) {
+    return new Promise(resolve => {
+        Gio.File.new_for_path(path).query_info_async('unix::device,unix::inode',
+            Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT, null, (file, result) => {
+                try {
+                    const info = file.query_info_finish(result);
+                    resolve(`${info.get_attribute_uint32('unix::device')}:${info.get_attribute_uint64('unix::inode')}`);
+                } catch {
+                    resolve(null);
+                }
+            });
+    });
+}
 
 // Asks before clearing the history, like Maccy's Clear (unpinned items) and
 // Option+Clear (every item). `clear(includePinned)` does it.
@@ -317,8 +335,7 @@ export default class LaccyExtension extends Extension {
 
         // File managers also offer the paths as text, so files come first. Apps
         // that offer text next to an image (like spreadsheets) are recorded as text.
-        const imageType = mimeTypes.includes('image/png')
-            ? 'image/png' : mimeTypes.find(mimeType => mimeType.startsWith('image/'));
+        const imageType = IMAGE_MIME_TYPES.find(mimeType => mimeTypes.includes(mimeType));
         if (mimeTypes.includes(URI_LIST_MIME_TYPE))
             this._recordFiles(sourceApp);
         else if (imageType && !mimeTypes.some(mimeType => TEXT_MIME_TYPES.includes(mimeType)))
@@ -554,7 +571,7 @@ export default class LaccyExtension extends Extension {
                 clearHistory: () => new ClearHistoryDialog(includePinned => {
                     this._callDaemon('Clear', new GLib.Variant('(b)', [includePinned]), 'clear the history');
                     if (this._settings.get_boolean(CLEAR_SYSTEM_CLIPBOARD_KEY))
-                        this.ClearClipboard();
+                        this._clearClipboard();
                 }).open(),
             });
             this._indicator.setIgnoreNext(this._ignoreNext);
@@ -662,34 +679,104 @@ export default class LaccyExtension extends Extension {
         }
     }
 
+    // The D-Bus methods below are named *Async so GJS hands them the
+    // invocation, whose sender _fromLaccy checks first.
+
     // D-Bus method, called by the popup when a text item is picked.
-    SetClipboard(text, paste) {
-        this._setClipboard(() => this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text));
-        this._pasteIfAllowed(paste);
-        // The popup has moved the item to the top already.
-        this._refreshLatestCopy();
+    SetClipboardAsync([text, paste], invocation) {
+        this._fromLaccy(invocation, () => {
+            this._setClipboard(() => this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text));
+            this._pasteIfAllowed(paste);
+            // The popup has moved the item to the top already.
+            this._refreshLatestCopy();
+        });
     }
 
     // D-Bus method, called by the popup when an image or files are picked.
-    SetContent(mimeType, data, paste) {
-        this._setClipboard(() =>
-            this._clipboard.set_content(St.ClipboardType.CLIPBOARD, mimeType, new GLib.Bytes(data)));
-        this._pasteIfAllowed(paste);
-        this._refreshLatestCopy();
+    SetContentAsync([mimeType, data, paste], invocation) {
+        this._fromLaccy(invocation, () => {
+            this._setClipboard(() =>
+                this._clipboard.set_content(St.ClipboardType.CLIPBOARD, mimeType, new GLib.Bytes(data)));
+            this._pasteIfAllowed(paste);
+            this._refreshLatestCopy();
+        });
     }
 
     // D-Bus method, called by the popup after it put a formatted item on the
     // clipboard itself.
-    Paste() {
-        this._pasteIfAllowed(true);
+    PasteAsync(_params, invocation) {
+        this._fromLaccy(invocation, () => this._pasteIfAllowed(true));
     }
 
     // D-Bus method, called by the popup after it cleared the history with
-    // "Clear the Clipboard Too" on. Empty text replaces what was copied:
-    // removing the owner instead would make GNOME put back its saved copy.
-    // Like a pick, it isn't recorded.
-    ClearClipboard() {
+    // "Clear the Clipboard Too" on.
+    ClearClipboardAsync(_params, invocation) {
+        this._fromLaccy(invocation, () => this._clearClipboard());
+    }
+
+    // Empty text replaces what was copied: removing the owner instead would
+    // make GNOME put back its saved copy. Like a pick, it isn't recorded.
+    _clearClipboard() {
         this._setClipboard(() => this._clipboard.set_text(St.ClipboardType.CLIPBOARD, ''));
+    }
+
+    // Runs `run` and answers `invocation` if the laccy popup made the call,
+    // and refuses it otherwise. Any program on the session bus can call these
+    // methods, sandboxed apps with bus access included. They run inside
+    // gnome-shell, which may set the clipboard while another app is focused
+    // and type into it, so without this check a background program could
+    // swap what the user copied, or paste into the focused window.
+    _fromLaccy(invocation, run) {
+        const sender = invocation.get_sender();
+        this._isLaccy(sender).then(isLaccy => {
+            if (!isLaccy) {
+                console.warn(`Laccy: refused ${invocation.get_method_name()} from ${sender}, which is not laccy`);
+                invocation.return_dbus_error('org.freedesktop.DBus.Error.AccessDenied',
+                    'Only the Laccy popup may call this method');
+                return;
+            }
+            // Unless the extension was disabled meanwhile.
+            if (this._clipboard)
+                run();
+            invocation.return_value(null);
+        }).catch(e => {
+            invocation.return_dbus_error('org.freedesktop.DBus.Error.Failed', e.message);
+        });
+    }
+
+    // Whether the bus connection `sender` belongs to a process running the
+    // laccy binary that Laccy's desktop file launches. The bus and the kernel
+    // vouch for the process ID; the binary is compared by file identity, not
+    // by path, so a copy or a link elsewhere doesn't pass.
+    async _isLaccy(sender) {
+        const executable = this._laccyExecutable();
+        if (!sender || !executable)
+            return false;
+        const pid = await new Promise((resolve, reject) => {
+            Gio.DBus.session.call('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
+                'GetConnectionUnixProcessID', new GLib.Variant('(s)', [sender]), new GLib.VariantType('(u)'),
+                Gio.DBusCallFlags.NONE, -1, null, (connection, result) => {
+                    try {
+                        resolve(connection.call_finish(result).deepUnpack()[0]);
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+        });
+        const [caller, expected] = await Promise.all([
+            fileIdentity(`/proc/${pid}/exe`),
+            fileIdentity(executable),
+        ]);
+        return caller !== null && caller === expected;
+    }
+
+    // The absolute path of the laccy binary, from the desktop file's Exec line.
+    _laccyExecutable() {
+        const app = Shell.AppSystem.get_default().lookup_app(APP_DESKTOP_ID);
+        const executable = app?.get_app_info()?.get_executable();
+        if (!executable)
+            return null;
+        return GLib.path_is_absolute(executable) ? executable : GLib.find_program_in_path(executable);
     }
 
     // Setting the clipboard emits owner-changed right away, which this flag
