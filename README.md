@@ -167,24 +167,29 @@ popup widens to the right while it's open.
 
 Open them with **Ctrl+,** in the popup, by right-clicking the clipboard icon
 in the top bar, by right-clicking Laccy in the app grid and choosing
-**Preferences**, or with `laccy --preferences`.
+**Preferences**, or with `laccy --preferences`. The window has four tabs:
+General, Appearance, History and About.
+
+General:
 
 - **Open Laccy:** the shortcut. Click it and press the new key combination.
+- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything, like Maccy (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Paste Automatically:** also paste after picking an item (off by default).
 - **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).
-- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything, like Maccy (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
-- **Pause Recording:** copies aren't recorded until you turn it off (off by default).
 
-Appearance:
+Appearance, List:
 
 - **Highlight Matches:** Bold, Italic, Underline or Color (Bold by default).
-- **Show Special Symbols:** show leading and trailing spaces as `·`, line breaks as `⏎` and tabs as `⇥` (on by default).
-- **Show Color Swatches:** items that are only a hex color, like `#3584e4` (`#` and 3, 4, 6 or 8 digits), show a square of that color (on by default).
-- **Show App Icons:** the icon of the app each item was copied from (off by default).
-- **Show Icon in Top Bar:** see [Top bar icon](#top-bar-icon) (on by default).
-- **Show Latest Copy in Top Bar:** the start of the most recently copied unpinned item next to the icon (off by default).
+- **Special Symbols:** show leading and trailing spaces as `·`, line breaks as `⏎` and tabs as `⇥` (on by default).
+- **Color Swatches:** items that are only a hex color, like `#3584e4` (`#` and 3, 4, 6 or 8 digits), show a square of that color (on by default).
+- **App Icons:** the icon of the app each item was copied from (off by default).
 
-Preview:
+Appearance, Top Bar:
+
+- **Show Icon:** see [Top bar icon](#top-bar-icon) (on by default).
+- **Show Latest Copy:** the start of the most recently copied unpinned item next to the icon (off by default).
+
+Appearance, Preview:
 
 - **Open Automatically:** open the preview once the selection rests (on by default).
 - **Delay:** how long it has to rest, in milliseconds (1500 by default).
@@ -193,12 +198,21 @@ History:
 
 - **History Size:** unpinned items to keep (200 by default).
 - **Sort By:** Last Copied, First Copied or Number of Copies (Last Copied by default), for items that aren't pinned.
-- **Pinned Items:** list pinned items at the Top or the Bottom, in the order you pinned them (Top by default).
+- **Pinned Items Go To:** list pinned items at the Top or the Bottom, in the order you pinned them (Top by default).
+- **Save:** Text, Images and Files, the kinds of copies that are recorded (all on by default).
+
+History, Privacy:
+
+- **Pause Recording:** copies aren't recorded until you turn it off (off by default).
+- **Ignored Apps:** apps whose copies are never recorded. They're listed on a page of their own; **+** adds one.
+- **Ignored Patterns:** regular expressions; text copies, and file copies by their paths, that match one are never recorded. Patterns are case-sensitive unless they start with `(?i)`, so `(?i)^sk-` skips keys starting with `sk-` or `SK-`. They're listed on a page of their own; **+** adds one.
 - **Clear History on Logout:** start each login with only your pinned items, like Maccy's "Clear history on quit" (off by default). Laccy clears when it first starts after you log in again, so it also works after a shutdown, a crash or a power cut; until then the old history stays in the history file.
 - **Clear the Clipboard Too:** clearing the history, from the popup or the top bar menu, also empties what's currently copied (off by default).
-- **Save Text, Save Images, Save Files:** which kinds of copies are recorded (all on by default).
-- **Ignored Apps:** apps whose copies are never recorded.
-- **Ignored Patterns:** regular expressions; text copies, and file copies by their paths, that match one are never recorded. Patterns are case-sensitive unless they start with `(?i)`, so `(?i)^sk-` skips keys starting with `sk-` or `SK-`.
+
+About: the version, links to the [source code](https://github.com/mlkonrad/laccy)
+and [issue tracker](https://github.com/mlkonrad/laccy/issues), and a
+[Buy Me a Coffee](https://buymeacoffee.com/mlkonrad) button if you'd like to
+support the project.
 
 Changes apply immediately. Settings are stored in GSettings with the
 extension's schema, so they also work from the command line:
@@ -232,6 +246,12 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Clear all history, latest copy in the top bar
 - [x] App icon
 - [ ] Flatpak/RPM packaging, extensions.gnome.org release
+
+## Support
+
+Laccy is free and open source. Bugs and ideas go to the
+[issue tracker](https://github.com/mlkonrad/laccy/issues). If Laccy saves you
+time, you can [buy me a coffee](https://buymeacoffee.com/mlkonrad).
 
 ## License
 

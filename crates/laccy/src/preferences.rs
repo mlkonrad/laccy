@@ -1,5 +1,9 @@
 //! The preferences window. Every control writes straight to GSettings, which
 //! the popup, the daemon and the GNOME Shell extension all read.
+//!
+//! Settings are split over tabs (General, Appearance, History, About), and the
+//! ignored apps and patterns get subpages of their own, so a long list never
+//! pushes the other settings out of view.
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -15,6 +19,15 @@ use laccy_core::search;
 
 const WINDOW_NAME: &str = "laccy-preferences";
 
+const REPOSITORY_URL: &str = "https://github.com/mlkonrad/laccy";
+const ISSUES_URL: &str = "https://github.com/mlkonrad/laccy/issues";
+const DONATION_URL: &str = "https://buymeacoffee.com/mlkonrad";
+
+/// Navigation tags of the main page and the subpages pushed over it.
+const MAIN_PAGE: &str = "main";
+const IGNORED_APPS_PAGE: &str = "ignored-apps";
+const IGNORED_PATTERNS_PAGE: &str = "ignored-patterns";
+
 /// Shows the preferences window, or raises it if it's already open.
 pub fn present(app: &adw::Application) {
     if let Some(window) = app.windows().into_iter().find(|window| window.widget_name() == WINDOW_NAME) {
@@ -22,51 +35,132 @@ pub fn present(app: &adw::Application) {
         return;
     }
 
-    let content: gtk::Widget = match config::settings() {
-        Some(settings) => preferences_page(&settings).upcast(),
-        None => adw::StatusPage::builder()
-            .icon_name("dialog-warning-symbolic")
-            .title("Extension Not Installed")
-            .description("Laccy keeps its settings with its GNOME Shell extension. Install it with scripts/install-dev.sh.")
-            .build()
-            .upcast(),
-    };
+    let navigation = adw::NavigationView::new();
+    let stack = adw::ViewStack::new();
+    let settings = config::settings();
+    match &settings {
+        Some(settings) => {
+            stack.add_titled_with_icon(&general_page(settings), Some("general"), "General", "preferences-system-symbolic");
+            stack.add_titled_with_icon(
+                &appearance_page(settings),
+                Some("appearance"),
+                "Appearance",
+                "preferences-desktop-appearance-symbolic",
+            );
+            stack.add_titled_with_icon(
+                &history_page(settings, &navigation),
+                Some("history"),
+                "History",
+                "document-open-recent-symbolic",
+            );
+        }
+        None => {
+            let missing = adw::StatusPage::builder()
+                .icon_name("dialog-warning-symbolic")
+                .title("Extension Not Installed")
+                .description("Laccy keeps its settings with its GNOME Shell extension. Install it with scripts/install-dev.sh.")
+                .build();
+            stack.add_titled_with_icon(&missing, Some("general"), "General", "preferences-system-symbolic");
+        }
+    }
+    stack.add_titled_with_icon(&about_page(), Some("about"), "About", "help-about-symbolic");
 
+    let switcher = adw::ViewSwitcher::builder()
+        .stack(&stack)
+        .policy(adw::ViewSwitcherPolicy::Wide)
+        .build();
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&content));
+    toolbar.add_top_bar(&adw::HeaderBar::builder().title_widget(&switcher).build());
+    toolbar.set_content(Some(&stack));
+
+    // The first page added is the one shown; subpages wait to be pushed.
+    navigation.add(&adw::NavigationPage::builder().title("Preferences").tag(MAIN_PAGE).child(&toolbar).build());
+    if let Some(settings) = &settings {
+        navigation.add(&subpage(IGNORED_APPS_PAGE, "Ignored Apps", ignored_apps_group(settings)));
+        navigation.add(&subpage(IGNORED_PATTERNS_PAGE, "Ignored Patterns", ignored_patterns_group(settings)));
+    }
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Preferences")
-        .default_width(560)
-        .default_height(640)
-        .content(&toolbar)
+        .title("Laccy Preferences")
+        .default_width(620)
+        .default_height(680)
+        .width_request(360)
+        .height_request(400)
+        .content(&navigation)
         .build();
     window.set_widget_name(WINDOW_NAME);
 
+    // Escape leaves a subpage first, and closes the window from the tabs.
     let shortcuts = gtk::ShortcutController::new();
     shortcuts.add_shortcut(gtk::Shortcut::new(
         gtk::ShortcutTrigger::parse_string("Escape"),
-        Some(gtk::NamedAction::new("window.close")),
+        Some(gtk::CallbackAction::new(glib::clone!(
+            #[weak]
+            navigation,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |widget, _| {
+                if !navigation.pop()
+                    && let Some(window) = widget.downcast_ref::<gtk::Window>()
+                {
+                    window.close();
+                }
+                glib::Propagation::Stop
+            }
+        ))),
     ));
     window.add_controller(shortcuts);
 
     window.present();
 }
 
-fn preferences_page(settings: &gio::Settings) -> adw::PreferencesPage {
+/// A navigation page showing `group` under its own header bar, which has a
+/// back button and `add_button`.
+fn subpage(tag: &str, title: &str, (group, add_button): (adw::PreferencesGroup, gtk::Button)) -> adw::NavigationPage {
     let page = adw::PreferencesPage::new();
-    page.add(&general_group(settings));
-    page.add(&appearance_group(settings));
-    page.add(&preview_group(settings));
-    page.add(&history_group(settings));
-    page.add(&ignored_apps_group(settings));
-    page.add(&ignored_patterns_group(settings));
-    page
+    page.add(&group);
+    let header = adw::HeaderBar::new();
+    header.pack_end(&add_button);
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&page));
+    adw::NavigationPage::builder().tag(tag).title(title).child(&toolbar).build()
 }
 
-fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
+/// A row that opens the subpage tagged `tag` and counts the entries of the
+/// string list setting `key` as its subtitle.
+fn subpage_row(
+    settings: &gio::Settings,
+    navigation: &adw::NavigationView,
+    key: &'static str,
+    tag: &'static str,
+    title: &str,
+    count: fn(usize) -> String,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::builder().title(title).activatable(true).build();
+    row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    let show_count = move |settings: &gio::Settings, row: &adw::ActionRow| row.set_subtitle(&count(settings.strv(key).len()));
+    show_count(settings, &row);
+    settings.connect_changed(
+        Some(key),
+        glib::clone!(
+            #[weak]
+            row,
+            move |settings, _| show_count(settings, &row)
+        ),
+    );
+    row.connect_activated(glib::clone!(
+        #[weak]
+        navigation,
+        move |_| navigation.push_by_tag(tag)
+    ));
+    row
+}
+
+fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+
     let group = adw::PreferencesGroup::new();
 
     let shortcut_label = gtk::ShortcutLabel::builder()
@@ -89,7 +183,7 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
 
     let shortcut_row = adw::ActionRow::builder()
         .title("Open Laccy")
-        .subtitle("The keyboard shortcut that shows your clipboard history")
+        .subtitle("Click to change")
         .activatable(true)
         .build();
     shortcut_row.add_suffix(&shortcut_label);
@@ -99,20 +193,6 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         move |row| shortcut_dialog(&settings).present(Some(row))
     ));
     group.add(&shortcut_row);
-
-    let paste_row = adw::SwitchRow::builder()
-        .title("Paste Automatically")
-        .subtitle("Paste the item you pick right away instead of only copying it. Alt+Enter does the opposite")
-        .build();
-    settings.bind(PASTE_AUTOMATICALLY_KEY, &paste_row, "active").build();
-    group.add(&paste_row);
-
-    let formatting_row = adw::SwitchRow::builder()
-        .title("Paste Without Formatting")
-        .subtitle("Paste text without bold, links or other styling. Alt+Shift+Enter does the opposite")
-        .build();
-    settings.bind(PASTE_WITHOUT_FORMATTING_KEY, &formatting_row, "active").build();
-    group.add(&formatting_row);
 
     let search_row = choice_row(
         settings,
@@ -131,10 +211,10 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     // Only the chosen mode is described, so the row stays short enough to show its value.
     let describe = |row: &adw::ComboRow| {
         let description = match search::Mode::ALL.get(row.selected() as usize) {
-            Some(search::Mode::Exact) => "Finds items that contain every word you type",
-            Some(search::Mode::Fuzzy) => "Also finds words with letters left out, so “gco” finds “git checkout”",
-            Some(search::Mode::Regex) => "Finds patterns, like “^https?://” for links",
-            Some(search::Mode::Mixed) => "Tries Exact, then Regular Expression, then Fuzzy, until something matches",
+            Some(search::Mode::Exact) => "Items containing every word you type",
+            Some(search::Mode::Fuzzy) => "Letters may be left out, so “gco” finds “git checkout”",
+            Some(search::Mode::Regex) => "Patterns, like “^https?://” for links",
+            Some(search::Mode::Mixed) => "Exact, then regular expression, then fuzzy",
             None => "",
         };
         row.set_subtitle(description);
@@ -142,20 +222,29 @@ fn general_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     describe(&search_row);
     search_row.connect_selected_notify(describe);
     group.add(&search_row);
+    page.add(&group);
 
-    let pause_row = adw::SwitchRow::builder()
-        .title("Pause Recording")
-        .subtitle("Stop saving new copies for a while. Alt-click the top bar icon to switch it quickly")
+    let paste_group = adw::PreferencesGroup::builder()
+        .title("Pasting")
+        .description("Alt+Enter and Alt+Shift+Enter do the opposite for a single item.")
         .build();
-    settings.bind(PAUSED_KEY, &pause_row, "active").build();
-    group.add(&pause_row);
+    for (key, title, subtitle) in [
+        (PASTE_AUTOMATICALLY_KEY, "Paste Automatically", "Paste the item you pick instead of only copying it"),
+        (PASTE_WITHOUT_FORMATTING_KEY, "Paste Without Formatting", "Leave out bold, links and other styling"),
+    ] {
+        let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).build();
+        settings.bind(key, &row, "active").build();
+        paste_group.add(&row);
+    }
+    page.add(&paste_group);
 
-    group
+    page
 }
 
-fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder().title("Appearance").build();
+fn appearance_page(settings: &gio::Settings) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
 
+    let list_group = adw::PreferencesGroup::builder().title("List").build();
     let highlight_row = choice_row(
         settings,
         HIGHLIGHT_MATCHES_KEY,
@@ -170,61 +259,64 @@ fn appearance_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         }),
     );
     highlight_row.set_title("Highlight Matches");
-    group.add(&highlight_row);
-
+    list_group.add(&highlight_row);
     for (key, title, subtitle) in [
-        (SHOW_SPECIAL_SYMBOLS_KEY, "Show Special Symbols", "Make spaces at the ends, line breaks and tabs visible as ·, ⏎ and ⇥"),
-        (SHOW_COLOR_SWATCHES_KEY, "Show Color Swatches", "Show a small square of color next to color codes like #3584e4"),
-        (SHOW_APP_ICONS_KEY, "Show App Icons", "Show which app each item was copied from"),
-        (SHOW_INDICATOR_KEY, "Show Icon in Top Bar", "Click it to open your clipboard history, right-click it for more options"),
+        (SHOW_SPECIAL_SYMBOLS_KEY, "Special Symbols", "Show edge spaces, line breaks and tabs as ·, ⏎ and ⇥"),
+        (SHOW_COLOR_SWATCHES_KEY, "Color Swatches", "Show a square of color next to codes like #3584e4"),
+        (SHOW_APP_ICONS_KEY, "App Icons", "Show which app each item was copied from"),
     ] {
         let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).build();
         settings.bind(key, &row, "active").build();
-        group.add(&row);
+        list_group.add(&row);
     }
+    page.add(&list_group);
 
+    let top_bar_group = adw::PreferencesGroup::builder().title("Top Bar").build();
+    let indicator_row = adw::SwitchRow::builder()
+        .title("Show Icon")
+        .subtitle("Click it for your history, right-click it for more")
+        .build();
+    settings.bind(SHOW_INDICATOR_KEY, &indicator_row, "active").build();
+    top_bar_group.add(&indicator_row);
     let latest_row = adw::SwitchRow::builder()
-        .title("Show Latest Copy in Top Bar")
-        .subtitle("Show the beginning of your most recent copy next to the icon")
+        .title("Show Latest Copy")
+        .subtitle("The beginning of your last copy, next to the icon")
         .build();
     settings.bind(SHOW_LATEST_COPY_KEY, &latest_row, "active").build();
     settings.bind(SHOW_INDICATOR_KEY, &latest_row, "sensitive").flags(gio::SettingsBindFlags::GET).build();
-    group.add(&latest_row);
+    top_bar_group.add(&latest_row);
+    page.add(&top_bar_group);
 
-    group
-}
-
-fn preview_group(settings: &gio::Settings) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder()
+    let preview_group = adw::PreferencesGroup::builder()
         .title("Preview")
-        .description("Press Ctrl+Space to see the selected item in full, along with where and when you copied it.")
+        .description("Ctrl+Space shows the selected item in full, with where and when you copied it.")
         .build();
-
     let automatic_row = adw::SwitchRow::builder()
         .title("Open Automatically")
-        .subtitle("Show the preview when you pause on an item")
+        .subtitle("When you pause on an item")
         .build();
     settings.bind(PREVIEW_AUTOMATICALLY_KEY, &automatic_row, "active").build();
-    group.add(&automatic_row);
-
+    preview_group.add(&automatic_row);
     let delay_row = adw::SpinRow::with_range(200.0, 100_000.0, 100.0);
     delay_row.set_title("Delay");
-    delay_row.set_subtitle("How long to wait before showing it, in milliseconds");
+    delay_row.set_subtitle("In milliseconds");
     settings.bind(PREVIEW_DELAY_KEY, &delay_row, "value").build();
     automatic_row.bind_property("active", &delay_row, "sensitive").sync_create().build();
-    group.add(&delay_row);
+    preview_group.add(&delay_row);
+    page.add(&preview_group);
 
-    group
+    page
 }
 
-fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder().title("History").build();
+fn history_page(settings: &gio::Settings, navigation: &adw::NavigationView) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
 
+    let list_group = adw::PreferencesGroup::new();
     let size_row = adw::SpinRow::with_range(1.0, 10_000.0, 10.0);
     size_row.set_title("History Size");
-    size_row.set_subtitle("How many items to remember. Pinned items are extra and always kept");
+    size_row.set_subtitle("Pinned items come on top of this");
     settings.bind(HISTORY_SIZE_KEY, &size_row, "value").build();
-    group.add(&size_row);
+    list_group.add(&size_row);
 
     let sort_row = choice_row(
         settings,
@@ -239,8 +331,7 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         }),
     );
     sort_row.set_title("Sort By");
-    sort_row.set_subtitle("The order of items that aren't pinned");
-    group.add(&sort_row);
+    list_group.add(&sort_row);
 
     let pin_row = choice_row(
         settings,
@@ -253,37 +344,141 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
             (position.name(), label)
         }),
     );
-    pin_row.set_title("Pinned Items");
-    pin_row.set_subtitle("Where pinned items are listed");
-    group.add(&pin_row);
+    pin_row.set_title("Pinned Items Go To");
+    list_group.add(&pin_row);
+    page.add(&list_group);
 
+    let save_group = adw::PreferencesGroup::builder().title("Save").build();
+    for (key, title) in [(RECORD_TEXT_KEY, "Text"), (RECORD_IMAGES_KEY, "Images"), (RECORD_FILES_KEY, "Files")] {
+        let row = adw::SwitchRow::builder().title(title).build();
+        settings.bind(key, &row, "active").build();
+        save_group.add(&row);
+    }
+    page.add(&save_group);
+
+    let privacy_group = adw::PreferencesGroup::builder().title("Privacy").build();
+    let pause_row = adw::SwitchRow::builder()
+        .title("Pause Recording")
+        .subtitle("Alt-click the top bar icon to switch it quickly")
+        .build();
+    settings.bind(PAUSED_KEY, &pause_row, "active").build();
+    privacy_group.add(&pause_row);
+    privacy_group.add(&subpage_row(settings, navigation, IGNORED_APPS_KEY, IGNORED_APPS_PAGE, "Ignored Apps", |count| {
+        match count {
+            0 => "None".to_owned(),
+            1 => "1 app".to_owned(),
+            count => format!("{count} apps"),
+        }
+    }));
+    privacy_group.add(&subpage_row(
+        settings,
+        navigation,
+        IGNORED_PATTERNS_KEY,
+        IGNORED_PATTERNS_PAGE,
+        "Ignored Patterns",
+        |count| match count {
+            0 => "None".to_owned(),
+            1 => "1 pattern".to_owned(),
+            count => format!("{count} patterns"),
+        },
+    ));
     // Laccy clears when it next starts after a login, see laccy_core::clear_if_new_login.
     let logout_row = adw::SwitchRow::builder()
         .title("Clear History on Logout")
         .subtitle("Start each login with only your pinned items")
         .build();
     settings.bind(CLEAR_ON_LOGOUT_KEY, &logout_row, "active").build();
-    group.add(&logout_row);
-
+    privacy_group.add(&logout_row);
     let clipboard_row = adw::SwitchRow::builder()
         .title("Clear the Clipboard Too")
-        .subtitle("Clearing the history also empties what's currently copied")
+        .subtitle("Clearing the history also empties what's copied now")
         .build();
     settings.bind(CLEAR_SYSTEM_CLIPBOARD_KEY, &clipboard_row, "active").build();
-    group.add(&clipboard_row);
+    privacy_group.add(&clipboard_row);
+    page.add(&privacy_group);
 
-    for (key, title) in [(RECORD_TEXT_KEY, "Save Text"), (RECORD_IMAGES_KEY, "Save Images"), (RECORD_FILES_KEY, "Save Files")] {
-        let row = adw::SwitchRow::builder().title(title).build();
-        settings.bind(key, &row, "active").build();
-        group.add(&row);
-    }
-
-    group
+    page
 }
 
-fn ignored_patterns_group(settings: &gio::Settings) -> adw::PreferencesGroup {
+fn about_page() -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+
+    let header = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .halign(gtk::Align::Center)
+        .margin_top(12)
+        .build();
+    let icon = gtk::Image::builder().icon_name(laccy_core::APP_ID).pixel_size(128).margin_bottom(6).build();
+    icon.add_css_class("icon-dropshadow");
+    header.append(&icon);
+    let name = gtk::Label::new(Some("Laccy"));
+    name.add_css_class("title-1");
+    header.append(&name);
+    let tagline = gtk::Label::builder()
+        .label("A lightweight clipboard manager for GNOME, inspired by Maccy")
+        .wrap(true)
+        .justify(gtk::Justification::Center)
+        .build();
+    tagline.add_css_class("dim-label");
+    header.append(&tagline);
+    let version = gtk::Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
+    version.add_css_class("dim-label");
+    version.add_css_class("caption");
+    header.append(&version);
+    let header_group = adw::PreferencesGroup::new();
+    header_group.add(&header);
+    page.add(&header_group);
+
+    let project_group = adw::PreferencesGroup::new();
+    project_group.add(&link_row("Source Code", "github.com/mlkonrad/laccy", REPOSITORY_URL));
+    project_group.add(&link_row("Report an Issue", "Found a bug or missing a feature? Let me know", ISSUES_URL));
+    page.add(&project_group);
+
+    let support_group = adw::PreferencesGroup::builder()
+        .title("Support Laccy")
+        .description("Laccy is free and open source. If it saves you time, a coffee helps keep it going.")
+        .build();
+    let coffee_button = gtk::Button::builder()
+        .child(&adw::ButtonContent::builder().icon_name("emote-love-symbolic").label("Buy Me a Coffee").build())
+        .tooltip_text(DONATION_URL)
+        .halign(gtk::Align::Center)
+        .margin_top(6)
+        .build();
+    coffee_button.add_css_class("pill");
+    coffee_button.add_css_class("suggested-action");
+    coffee_button.connect_clicked(|button| open_uri(button, DONATION_URL));
+    support_group.add(&coffee_button);
+    page.add(&support_group);
+
+    page
+}
+
+/// A row that opens `uri` in the browser.
+fn link_row(title: &str, subtitle: &str, uri: &'static str) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .subtitle(subtitle)
+        .tooltip_text(uri)
+        .activatable(true)
+        .build();
+    row.add_suffix(&gtk::Image::from_icon_name("adw-external-link-symbolic"));
+    row.connect_activated(move |row| open_uri(row, uri));
+    row
+}
+
+fn open_uri(widget: &impl IsA<gtk::Widget>, uri: &str) {
+    let window = widget.root().and_downcast::<gtk::Window>();
+    gtk::UriLauncher::new(uri).launch(window.as_ref(), gio::Cancellable::NONE, |result| {
+        if let Err(err) = result {
+            eprintln!("laccy: cannot open link: {err}");
+        }
+    });
+}
+
+/// The ignored patterns list, and the button for its header bar that adds one.
+fn ignored_patterns_group(settings: &gio::Settings) -> (adw::PreferencesGroup, gtk::Button) {
     let group = adw::PreferencesGroup::builder()
-        .title("Ignored Patterns")
         .description(
             "Copied text and files matching any of these regular expressions are never saved, like “^sk-” to skip \
              API keys. Upper and lower case must match unless a pattern starts with (?i).",
@@ -293,15 +488,12 @@ fn ignored_patterns_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     let add_button = gtk::Button::builder()
         .icon_name("list-add-symbolic")
         .tooltip_text("Ignore a Pattern")
-        .valign(gtk::Align::Center)
         .build();
-    add_button.add_css_class("flat");
     add_button.connect_clicked(glib::clone!(
         #[strong]
         settings,
         move |button| pattern_dialog(&settings).present(Some(button))
     ));
-    group.set_header_suffix(Some(&add_button));
 
     let placeholder = gtk::Label::builder()
         .label("No ignored patterns")
@@ -324,11 +516,11 @@ fn ignored_patterns_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         ),
     );
 
-    group
+    (group, add_button)
 }
 
 fn fill_ignored_patterns(list: &gtk::ListBox, settings: &gio::Settings) {
-    list.remove_all();
+    remove_rows(list);
     for pattern in strings(settings, IGNORED_PATTERNS_KEY) {
         let row = adw::ActionRow::builder().title(&pattern).use_markup(false).build();
         row.add_css_class("monospace");
@@ -430,9 +622,9 @@ fn pattern_dialog(settings: &gio::Settings) -> adw::Dialog {
     dialog
 }
 
-fn ignored_apps_group(settings: &gio::Settings) -> adw::PreferencesGroup {
+/// The ignored apps list, and the button for its header bar that adds one.
+fn ignored_apps_group(settings: &gio::Settings) -> (adw::PreferencesGroup, gtk::Button) {
     let group = adw::PreferencesGroup::builder()
-        .title("Ignored Apps")
         .description(
             "Copies from these apps are never saved. Passwords copied from password managers are always skipped.",
         )
@@ -441,15 +633,12 @@ fn ignored_apps_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     let add_button = gtk::Button::builder()
         .icon_name("list-add-symbolic")
         .tooltip_text("Ignore an App")
-        .valign(gtk::Align::Center)
         .build();
-    add_button.add_css_class("flat");
     add_button.connect_clicked(glib::clone!(
         #[strong]
         settings,
         move |button| app_picker(&settings).present(Some(button))
     ));
-    group.set_header_suffix(Some(&add_button));
 
     let placeholder = gtk::Label::builder()
         .label("No ignored apps")
@@ -472,11 +661,11 @@ fn ignored_apps_group(settings: &gio::Settings) -> adw::PreferencesGroup {
         ),
     );
 
-    group
+    (group, add_button)
 }
 
 fn fill_ignored_apps(list: &gtk::ListBox, settings: &gio::Settings) {
-    list.remove_all();
+    remove_rows(list);
     let installed = gio::AppInfo::all();
     for app_id in strings(settings, IGNORED_APPS_KEY) {
         let info = installed.iter().find(|app| app.id().is_some_and(|id| id == app_id.as_str()));
@@ -502,7 +691,7 @@ fn fill_ignored_apps(list: &gtk::ListBox, settings: &gio::Settings) {
             move |_| {
                 let remaining: Vec<String> =
                     strings(&settings, IGNORED_APPS_KEY).into_iter().filter(|ignored| *ignored != app_id).collect();
-                set_strings(&settings, IGNORED_APPS_KEY,remaining);
+                set_strings(&settings, IGNORED_APPS_KEY, remaining);
             }
         ));
         row.add_suffix(&remove_button);
@@ -553,7 +742,7 @@ fn app_picker(settings: &gio::Settings) -> adw::Dialog {
             move |_| {
                 let mut ignored = strings(&settings, IGNORED_APPS_KEY);
                 ignored.push(app_id.clone());
-                set_strings(&settings, IGNORED_APPS_KEY,ignored);
+                set_strings(&settings, IGNORED_APPS_KEY, ignored);
                 dialog.close();
             }
         ));
@@ -707,6 +896,13 @@ fn choice_row<const N: usize>(
         .set_mapping(move |value, _| Some(set_names.get(value.get::<u32>().ok()? as usize)?.to_variant()))
         .build();
     row
+}
+
+/// Empties `list` but keeps its placeholder, which `ListBox::remove_all` drops too.
+fn remove_rows(list: &gtk::ListBox) {
+    while let Some(row) = list.row_at_index(0) {
+        list.remove(&row);
+    }
 }
 
 fn strings(settings: &gio::Settings, key: &str) -> Vec<String> {
