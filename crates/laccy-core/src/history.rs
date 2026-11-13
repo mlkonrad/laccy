@@ -448,23 +448,37 @@ impl History {
         free_pin_keys(&self.conn)
     }
 
-    /// Renames a pinned item and changes its key. A blank `name` removes the
-    /// name; `None` for `key` leaves the item without one. A key not in
-    /// [`PIN_KEYS`] is ignored, and one another item has moves to this one.
-    /// Does nothing to an unpinned item.
-    pub fn edit_pin(&self, id: i64, name: &str, key: Option<char>) -> Result<()> {
+    /// Renames a pinned item and changes its key, and its text if `text` is
+    /// given. A blank `name` removes the name; `None` for `key` leaves the item
+    /// without one. A key not in [`PIN_KEYS`] is ignored, and one another item
+    /// has moves to this one. New text replaces a text item's content and drops
+    /// its formats, which no longer match; empty text, and text for an image or
+    /// files, is ignored. Does nothing to an unpinned item.
+    pub fn edit_pin(&self, id: i64, name: &str, key: Option<char>, text: Option<&str>) -> Result<()> {
         let name = Some(name.trim()).filter(|name| !name.is_empty());
         let key = key.filter(|key| PIN_KEYS.contains(*key)).map(|key| key.to_string());
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
-        let pinned: bool = tx
-            .query_row("SELECT pinned_at IS NOT NULL FROM items WHERE id = ?1", params![id], |row| row.get(0))
-            .optional()?
-            .unwrap_or(false);
-        if pinned {
-            if key.is_some() {
-                tx.execute("UPDATE items SET pin_key = NULL WHERE pin_key = ?1 AND id != ?2", params![key, id])?;
-            }
-            tx.execute("UPDATE items SET name = ?2, pin_key = ?3 WHERE id = ?1", params![id, name, key])?;
+        let item: Option<(Kind, String)> = tx
+            .query_row(
+                "SELECT kind, text FROM items WHERE id = ?1 AND pinned_at IS NOT NULL",
+                params![id],
+                |row| Ok((Kind::from_i64(row.get(0)?), row.get(1)?)),
+            )
+            .optional()?;
+        let Some((kind, old_text)) = item else {
+            return Ok(());
+        };
+        if key.is_some() {
+            tx.execute("UPDATE items SET pin_key = NULL WHERE pin_key = ?1 AND id != ?2", params![key, id])?;
+        }
+        tx.execute("UPDATE items SET name = ?2, pin_key = ?3 WHERE id = ?1", params![id, name, key])?;
+        if let Some(text) = text.filter(|text| kind == Kind::Text && !text.is_empty() && *text != old_text) {
+            // Hashed like `add` hashes text, so copying the new text finds this item.
+            tx.execute(
+                "UPDATE items SET text = ?2, hash = ?3 WHERE id = ?1",
+                params![id, text, content_hash(text.as_bytes())],
+            )?;
+            tx.execute("DELETE FROM formats WHERE item_id = ?1", params![id])?;
         }
         tx.commit()
     }
@@ -811,11 +825,11 @@ mod tests {
         history.set_pinned(b, true).unwrap();
         assert_eq!(history.free_pin_keys().unwrap()[..2], ['e', 'f']);
 
-        history.edit_pin(a, "  Work email ", Some('x')).unwrap();
+        history.edit_pin(a, "  Work email ", Some('x'), None).unwrap();
         // X isn't a pin key, so A loses its key.
         assert_eq!(pin(&history, a), (Some("Work email".into()), None));
         // Taking B's key moves it.
-        history.edit_pin(a, "Work email", Some('d')).unwrap();
+        history.edit_pin(a, "Work email", Some('d'), None).unwrap();
         assert_eq!(pin(&history, a), (Some("Work email".into()), Some('d')));
         assert_eq!(pin(&history, b), (None, None));
 
@@ -825,13 +839,44 @@ mod tests {
         assert_eq!(pin(&history, c), (None, Some('b')));
 
         // A blank name removes it, and unpinned items can't be edited.
-        history.edit_pin(a, "  ", Some('d')).unwrap();
+        history.edit_pin(a, "  ", Some('d'), None).unwrap();
         assert_eq!(pin(&history, a), (None, Some('d')));
-        history.edit_pin(a, "Again", Some('d')).unwrap();
+        history.edit_pin(a, "Again", Some('d'), None).unwrap();
         history.set_pinned(a, false).unwrap();
         assert_eq!(pin(&history, a), (None, None));
-        history.edit_pin(a, "Unpinned", Some('e')).unwrap();
+        history.edit_pin(a, "Unpinned", Some('e'), None).unwrap();
         assert_eq!(pin(&history, a), (None, None));
+    }
+
+    #[test]
+    fn edit_pin_replaces_text_and_drops_formats() {
+        let mut history = History::open_in_memory().unwrap();
+        let id = history.add(&text("hello"), None, 10).unwrap();
+        history.set_formats(id, &[html("<b>hello</b>")]).unwrap();
+        history.set_pinned(id, true).unwrap();
+
+        // The same text, or none, keeps the formatting.
+        history.edit_pin(id, "Greeting", Some('b'), Some("hello")).unwrap();
+        history.edit_pin(id, "Greeting", Some('b'), None).unwrap();
+        assert_eq!(history.formats(id).unwrap(), [html("<b>hello</b>")]);
+
+        // Empty text is ignored.
+        history.edit_pin(id, "Greeting", Some('b'), Some("")).unwrap();
+        assert_eq!(history.content(id).unwrap(), Some(text("hello")));
+
+        history.edit_pin(id, "Greeting", Some('b'), Some("hello, world")).unwrap();
+        assert_eq!(history.content(id).unwrap(), Some(text("hello, world")));
+        assert!(history.formats(id).unwrap().is_empty());
+        assert_eq!(pin(&history, id), (Some("Greeting".into()), Some('b')));
+        // Copying the new text finds the edited item.
+        assert_eq!(history.add(&text("hello, world"), None, 10).unwrap(), id);
+
+        // An image's content can't be replaced with text.
+        let image_id = history.add(&image(b"png"), None, 10).unwrap();
+        history.set_pinned(image_id, true).unwrap();
+        history.edit_pin(image_id, "Logo", None, Some("text")).unwrap();
+        assert_eq!(history.content(image_id).unwrap(), Some(image(b"png")));
+        assert_eq!(pin(&history, image_id), (Some("Logo".into()), None));
     }
 
     #[test]

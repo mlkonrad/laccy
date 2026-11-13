@@ -628,13 +628,63 @@ impl Popup {
         rows.add_css_class("boxed-list");
         rows.append(&name_row);
         rows.append(&key_row);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        content.append(&rows);
 
         let dialog = adw::AlertDialog::new(
             Some("Edit Pin"),
             Some("The name shows in the list instead of the copied content, and search finds it too."),
         );
-        dialog.set_extra_child(Some(&rows));
         dialog.add_responses(&[("cancel", "_Cancel"), ("save", "_Save")]);
+
+        // Only text can be edited. Its formatting can't follow the edit, so
+        // changed text loses it, as in Maccy; the warning says so once it changes.
+        let text_view = match self.history.content(id) {
+            Ok(Some(Content::Text(text))) => {
+                let has_formats = self.history.formats(id).is_ok_and(|formats| !formats.is_empty());
+                let text_view = gtk::TextView::builder()
+                    .wrap_mode(gtk::WrapMode::WordChar)
+                    .top_margin(8)
+                    .bottom_margin(8)
+                    .left_margin(8)
+                    .right_margin(8)
+                    .build();
+                text_view.buffer().set_text(&text);
+                let scrolled = gtk::ScrolledWindow::builder()
+                    .hscrollbar_policy(gtk::PolicyType::Never)
+                    .height_request(160)
+                    .child(&text_view)
+                    .build();
+                scrolled.add_css_class("card");
+                let heading = gtk::Label::builder().label("Content").xalign(0.0).build();
+                heading.add_css_class("heading");
+                let warning = gtk::Label::builder()
+                    .label("Editing the content removes its formatting, like bold or links.")
+                    .wrap(true)
+                    .xalign(0.0)
+                    .visible(false)
+                    .build();
+                warning.add_css_class("warning");
+                content.append(&heading);
+                content.append(&scrolled);
+                content.append(&warning);
+                let response_dialog = dialog.downgrade();
+                text_view.buffer().connect_changed(move |buffer| {
+                    let new_text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+                    warning.set_visible(has_formats && new_text != text);
+                    if let Some(dialog) = response_dialog.upgrade() {
+                        dialog.set_response_enabled("save", !new_text.is_empty());
+                    }
+                });
+                Some(text_view)
+            }
+            Ok(_) => None,
+            Err(err) => {
+                eprintln!("laccy: cannot read item: {err}");
+                None
+            }
+        };
+        dialog.set_extra_child(Some(&content));
         dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("save"));
         dialog.set_close_response("cancel");
@@ -646,7 +696,11 @@ impl Popup {
                 self,
                 move |_, _| {
                     let key = keys.get(key_row.selected() as usize).copied().flatten();
-                    if let Err(err) = popup.history.edit_pin(id, &name_row.text(), key) {
+                    let text = text_view.as_ref().map(|view| {
+                        let buffer = view.buffer();
+                        buffer.text(&buffer.start_iter(), &buffer.end_iter(), false)
+                    });
+                    if let Err(err) = popup.history.edit_pin(id, &name_row.text(), key, text.as_deref()) {
                         eprintln!("laccy: cannot update item: {err}");
                     }
                     popup.reload();
