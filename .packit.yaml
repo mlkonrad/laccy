@@ -1,0 +1,36 @@
+# Packit builds Laccy's RPMs in COPR (https://packit.dev/docs/configuration).
+# Releases go to copr.fedorainfracloud.org/coprs/mlkonrad/laccy; pull
+# requests are test-built in temporary Packit projects.
+
+specfile_path: laccy.spec
+upstream_package_name: laccy
+downstream_package_name: laccy
+upstream_tag_template: v{version}
+
+jobs:
+  - job: copr_build
+    trigger: pull_request
+    # GNOME 50 is Fedora 44, GNOME 51 is Fedora 45, matching shell-version
+    # in metadata.json.
+    targets:
+      - fedora-44-x86_64
+      - fedora-44-aarch64
+      - fedora-45-x86_64
+      - fedora-45-aarch64
+    # Cargo fetches crates from crates.io during the build.
+    enable_net: true
+
+  - job: copr_build
+    trigger: release
+    owner: mlkonrad
+    project: laccy
+    # GNOME 50 is Fedora 44, GNOME 51 is Fedora 45, matching shell-version
+    # in metadata.json.
+    targets:
+      - fedora-44-x86_64
+      - fedora-44-aarch64
+      - fedora-45-x86_64
+      - fedora-45-aarch64
+    enable_net: true
+    list_on_homepage: true
+    preserve_project: true

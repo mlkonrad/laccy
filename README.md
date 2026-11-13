@@ -94,13 +94,26 @@ the focused app.
 
 ## Build and install
 
-Requirements (Fedora): `sudo dnf install cargo rust gtk4-devel libadwaita-devel`
+On Fedora 44 and 45, install the packages from
+[COPR](https://copr.fedorainfracloud.org/coprs/mlkonrad/laccy/):
+
+```sh
+sudo dnf copr enable mlkonrad/laccy
+sudo dnf install laccy
+```
+
+`laccy` is the app; it brings in `gnome-shell-extension-laccy`, the
+extension. If you'd rather get the extension from extensions.gnome.org,
+install the app alone with `sudo dnf install --setopt=install_weak_deps=False laccy`.
+
+To build from source instead (requirements on Fedora:
+`sudo dnf install cargo rust gtk4-devel libadwaita-devel`):
 
 ```sh
 scripts/install-dev.sh     # builds, installs into ~/.local, links the extension
 ```
 
-The first time, log out and back in (GNOME Shell only discovers new extensions
+Either way, the first time, log out and back in (GNOME Shell only discovers new extensions
 at login), then run `gnome-extensions enable laccy@mlkonrad.github.com`.
 Laccy has no shortcut until you set one under **Open Laccy** in
 [Preferences](#preferences); until then, click the clipboard icon in the top bar.
@@ -261,7 +274,8 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Sort order, preview, highlighted matches, special symbols, color swatches, app icons
 - [x] Clear all history, latest copy in the top bar
 - [x] App icon
-- [ ] Flatpak/RPM packaging, extensions.gnome.org release
+- [x] RPM packages in COPR
+- [ ] Flatpak packaging, extensions.gnome.org release
 
 ## Support
 
