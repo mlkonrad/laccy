@@ -13,8 +13,8 @@ use laccy_core::{
 };
 
 const PREVIEW_CHARS: usize = 100;
-/// Items reachable with Ctrl+1 … Ctrl+9.
-const NUMBERED_ITEMS: u32 = 9;
+/// Unpinned items reachable with Ctrl+1 to Ctrl+9. Pinned items have their own keys.
+const NUMBERED_ITEMS: usize = 9;
 /// Tells the popup apart from the preferences window.
 const WINDOW_NAME: &str = "laccy-popup";
 const POPUP_WIDTH: i32 = 480;
@@ -149,6 +149,7 @@ impl Popup {
             mode: Cell::new(config.search_mode),
             apps: OnceCell::new(),
             list_items: RefCell::default(),
+            numbered: RefCell::default(),
         });
         let list = gtk::ListView::new(Some(selection.clone()), Some(row_factory(Rc::clone(&rows))));
         list.set_single_click_activate(true);
@@ -372,10 +373,21 @@ impl Popup {
             gdk::Key::q | gdk::Key::Q if mods == Mod::CONTROL_MASK => self.quit(),
             // Maccy's default preview shortcut.
             gdk::Key::space if mods == Mod::CONTROL_MASK => self.toggle_preview(),
-            _ if mods == Mod::CONTROL_MASK => match key.to_unicode().and_then(|c| c.to_digit(10)) {
-                Some(digit @ 1..=NUMBERED_ITEMS) => self.pick(digit - 1, paste, plain),
-                _ => return glib::Propagation::Proceed,
-            },
+            _ if mods == Mod::CONTROL_MASK => {
+                let Some(c) = key.to_lower().to_unicode() else {
+                    return glib::Propagation::Proceed;
+                };
+                let position = match c.to_digit(10) {
+                    Some(digit @ 1..) => self.rows.numbered.borrow().get(digit as usize - 1).copied(),
+                    Some(0) => None,
+                    None => self.pinned_position(c),
+                };
+                match position {
+                    Some(position) => self.pick(position, paste, plain),
+                    // Ctrl+A, Ctrl+C and the like stay with the search field.
+                    None => return glib::Propagation::Proceed,
+                }
+            }
             _ => return glib::Propagation::Proceed,
         }
         glib::Propagation::Stop
@@ -433,11 +445,22 @@ impl Popup {
             matches.split_off(matches.len().min(INITIAL_ROWS))
         };
         self.deferred_rows.replace(deferred);
-        // Rows bound by the splice highlight this query; rows GTK keeps bound are updated after.
+        // Rows bound by the splice highlight this query and show these
+        // shortcuts; rows GTK keeps bound are updated after.
         self.rows.query.replace(self.valid_query.borrow().clone());
         self.rows.mode.set(matched_mode);
+        self.rows.numbered.replace(
+            matches
+                .iter()
+                .chain(self.deferred_rows.borrow().iter())
+                .enumerate()
+                .filter(|(_, object)| !object.borrow::<Item>().pinned)
+                .map(|(position, _)| position as u32)
+                .take(NUMBERED_ITEMS)
+                .collect(),
+        );
         self.store.splice(0, self.store.n_items(), &matches);
-        self.rows.refresh_highlights();
+        self.rows.refresh_rows();
 
         if objects.is_empty() {
             self.empty.set_title("No Clipboard History");
@@ -472,6 +495,11 @@ impl Popup {
     fn item_at<T>(&self, position: u32, f: impl FnOnce(&Item) -> T) -> Option<T> {
         let object = self.store.item(position).and_downcast::<glib::BoxedAnyObject>()?;
         Some(f(&object.borrow::<Item>()))
+    }
+
+    /// Where the listed item pinned with `key` is, if it's listed.
+    fn pinned_position(&self, key: char) -> Option<u32> {
+        (0..self.store.n_items()).find(|&position| self.item_at(position, |item| item.pin_key) == Some(Some(key)))
     }
 
     /// Copies the item at `position` and closes the popup. The extension sets
@@ -1038,6 +1066,9 @@ struct RowState {
     /// Every row's list item. GTK can keep rows bound when the search changes,
     /// so they're highlighted again through these.
     list_items: RefCell<Vec<glib::WeakRef<gtk::ListItem>>>,
+    /// The positions of the listed items Ctrl+1 to Ctrl+9 pick: the first
+    /// unpinned ones, so pinning doesn't renumber them.
+    numbered: RefCell<Vec<u32>>,
 }
 
 impl RowState {
@@ -1060,13 +1091,36 @@ impl RowState {
         label.set_attributes(highlight_attributes(&ranges, self.config.highlight_matches).as_ref());
     }
 
-    fn refresh_highlights(&self) {
+    /// The shortcut that picks `item` at `position`: its pin key, or its number.
+    fn shortcut(&self, position: u32, item: &Item) -> String {
+        if item.pinned {
+            return item.pin_key.map(|key| format!("Ctrl+{}", key.to_ascii_uppercase())).unwrap_or_default();
+        }
+        match self.numbered.borrow().iter().position(|&numbered| numbered == position) {
+            Some(index) => format!("Ctrl+{}", index + 1),
+            None => String::new(),
+        }
+    }
+
+    /// Updates a bound row's shortcut.
+    fn update_shortcut(&self, list_item: &gtk::ListItem) {
+        let (Some(object), Some(row)) = (list_item.item().and_downcast::<glib::BoxedAnyObject>(), list_item.child())
+        else {
+            return;
+        };
+        let shortcut: gtk::Label = named_child(&row, "shortcut");
+        shortcut.set_text(&self.shortcut(list_item.position(), &object.borrow::<Item>()));
+    }
+
+    /// Highlights and shortcuts of the rows GTK kept bound through a new search.
+    fn refresh_rows(&self) {
         self.list_items.borrow_mut().retain(|list_item| {
             let Some(list_item) = list_item.upgrade() else {
                 return false;
             };
             if let (Some(_), Some(row)) = (list_item.item(), list_item.child()) {
                 self.highlight(&named_child(&row, "text"));
+                self.update_shortcut(&list_item);
             }
             true
         });
@@ -1163,13 +1217,8 @@ fn row_factory(state: Rc<RowState>) -> gtk::SignalListItemFactory {
         list_item.set_child(Some(&row));
 
         // Items can move without being rebound, so follow the position itself.
-        list_item.connect_position_notify(move |list_item| {
-            let position = list_item.position();
-            shortcut.set_text(&match position {
-                p if p < NUMBERED_ITEMS => format!("Ctrl+{}", p + 1),
-                _ => String::new(),
-            });
-        });
+        let position_state = Rc::clone(&setup_state);
+        list_item.connect_position_notify(move |list_item| position_state.update_shortcut(list_item));
     });
 
     factory.connect_bind(move |_, list_item| {
@@ -1245,10 +1294,7 @@ fn row_factory(state: Rc<RowState>) -> gtk::SignalListItemFactory {
 
         label.set_text(&text);
         state.highlight(&label);
-        shortcut.set_text(&match list_item.position() {
-            p if p < NUMBERED_ITEMS => format!("Ctrl+{}", p + 1),
-            _ => String::new(),
-        });
+        shortcut.set_text(&state.shortcut(list_item.position(), &item));
     });
 
     factory

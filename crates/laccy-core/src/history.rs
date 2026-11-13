@@ -12,6 +12,11 @@ pub use rusqlite::{Error, Result};
 /// only read when an item is picked, so huge copies don't slow the popup down.
 pub const EXCERPT_CHARS: usize = 10_000;
 
+/// The keys pinned items get, in the order they're handed out: Ctrl plus the
+/// key picks the item in the popup. Letters the search field uses with Ctrl
+/// (select all, copy, cut, paste, undo, redo) and Q (quit) are left out.
+pub const PIN_KEYS: &str = "bdefghijklmnoprstuw";
+
 /// What was copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Content {
@@ -86,6 +91,9 @@ pub struct Item {
     pub excerpt: String,
     pub source_app: Option<String>,
     pub pinned: bool,
+    /// The pinned item's key from [`PIN_KEYS`]. `None` when unpinned, or when
+    /// every key was taken as it was pinned.
+    pub pin_key: Option<char>,
     /// When it was first and last copied, in milliseconds since the Unix epoch.
     pub first_copied: i64,
     pub last_copied: i64,
@@ -137,6 +145,13 @@ CREATE TABLE formats (
 PRAGMA user_version = 3;
 ";
 
+/// A key for each pinned item, see [`PIN_KEYS`]. Items pinned before are given
+/// keys by [`assign_missing_pin_keys`].
+const MIGRATION_V4: &str = "
+ALTER TABLE items ADD COLUMN pin_key TEXT;
+PRAGMA user_version = 4;
+";
+
 pub struct History {
     conn: Connection,
 }
@@ -175,6 +190,10 @@ impl History {
         }
         if version < 3 {
             tx.execute_batch(MIGRATION_V3)?;
+        }
+        if version < 4 {
+            tx.execute_batch(MIGRATION_V4)?;
+            assign_missing_pin_keys(&tx)?;
         }
         tx.commit()?;
         Ok(Self { conn })
@@ -248,7 +267,8 @@ impl History {
     /// rest in `order`.
     pub fn items(&self, order: SortOrder) -> Result<Vec<Item>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, kind, substr(text, 1, ?1), source_app, pinned_at IS NOT NULL, first_copied, last_copied, copy_count
+            "SELECT id, kind, substr(text, 1, ?1), source_app, pinned_at IS NOT NULL, first_copied, last_copied, copy_count,
+                    pin_key
              FROM items
              ORDER BY pinned_at IS NULL, pinned_at, {}",
             order.order_by()
@@ -260,6 +280,7 @@ impl History {
                 excerpt: row.get(2)?,
                 source_app: row.get(3)?,
                 pinned: row.get(4)?,
+                pin_key: row.get::<_, Option<String>>(8)?.and_then(|key| key.chars().next()),
                 first_copied: row.get(5)?,
                 last_copied: row.get(6)?,
                 copy_count: row.get(7)?,
@@ -285,6 +306,7 @@ impl History {
                         excerpt: row.get(2)?,
                         source_app: row.get(3)?,
                         pinned: false,
+                        pin_key: None,
                         first_copied: row.get(4)?,
                         last_copied: row.get(5)?,
                         copy_count: row.get(6)?,
@@ -356,12 +378,23 @@ impl History {
         self.conn.execute_batch("PRAGMA shrink_memory")
     }
 
+    /// Pins or unpins an item. A newly pinned item gets the first free key
+    /// from [`PIN_KEYS`]; an unpinned one gives its key back.
     pub fn set_pinned(&self, id: i64, pinned: bool) -> Result<()> {
-        self.conn.execute(
-            "UPDATE items SET pinned_at = CASE WHEN ?2 THEN COALESCE(pinned_at, ?3) END WHERE id = ?1",
+        // Immediate, so two popups can't hand out the same key. Unchecked, as
+        // the popup shares the history; nothing else uses it meanwhile.
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE items
+             SET pinned_at = CASE WHEN ?2 THEN COALESCE(pinned_at, ?3) END,
+                 pin_key = CASE WHEN ?2 THEN pin_key END
+             WHERE id = ?1",
             params![id, pinned, now_millis()],
         )?;
-        Ok(())
+        if pinned {
+            assign_missing_pin_keys(&tx)?;
+        }
+        tx.commit()
     }
 
     pub fn delete(&self, id: i64) -> Result<()> {
@@ -377,6 +410,24 @@ impl History {
             self.conn.execute("DELETE FROM items WHERE pinned_at IS NULL", [])
         }
     }
+}
+
+/// Gives pinned items without a key the free keys from [`PIN_KEYS`], earliest
+/// pinned first, until they run out.
+fn assign_missing_pin_keys(tx: &Transaction) -> Result<()> {
+    let used: String = tx
+        .prepare("SELECT pin_key FROM items WHERE pin_key IS NOT NULL")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<_>>()?;
+    let mut free = PIN_KEYS.chars().filter(|key| !used.contains(*key));
+    let missing: Vec<i64> = tx
+        .prepare("SELECT id FROM items WHERE pinned_at IS NOT NULL AND pin_key IS NULL ORDER BY pinned_at, id")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_>>()?;
+    for (id, key) in missing.into_iter().zip(&mut free) {
+        tx.execute("UPDATE items SET pin_key = ?1 WHERE id = ?2", params![key.to_string(), id])?;
+    }
+    Ok(())
 }
 
 /// Strictly increasing, so copies within the same millisecond keep their order.
@@ -630,6 +681,69 @@ mod tests {
         assert_eq!(history.add(&text("old"), None, 10).unwrap(), items[0].id);
         history.set_formats(items[0].id, &[html("<b>old</b>")]).unwrap();
         assert_eq!(history.formats(items[0].id).unwrap(), [html("<b>old</b>")]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Each item's key, by text: pins made within a millisecond have no set order.
+    fn pin_keys(history: &History) -> Vec<(String, Option<char>)> {
+        let mut keys: Vec<_> =
+            history.items(SortOrder::LastCopied).unwrap().into_iter().map(|item| (item.excerpt, item.pin_key)).collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn pinned_items_get_free_keys_in_order() {
+        let mut history = History::open_in_memory().unwrap();
+        let a = history.add(&text("a"), None, 10).unwrap();
+        let b = history.add(&text("b"), None, 10).unwrap();
+        let c = history.add(&text("c"), None, 10).unwrap();
+        history.set_pinned(a, true).unwrap();
+        history.set_pinned(b, true).unwrap();
+        // Pinning again keeps the key.
+        history.set_pinned(a, true).unwrap();
+        assert_eq!(pin_keys(&history), [("a".into(), Some('b')), ("b".into(), Some('d')), ("c".into(), None)]);
+
+        // Unpinning gives the key back, and the next pin takes it.
+        history.set_pinned(a, false).unwrap();
+        history.set_pinned(c, true).unwrap();
+        assert_eq!(pin_keys(&history), [("a".into(), None), ("b".into(), Some('d')), ("c".into(), Some('b'))]);
+    }
+
+    #[test]
+    fn pins_beyond_the_keys_get_none() {
+        let mut history = History::open_in_memory().unwrap();
+        let count = PIN_KEYS.chars().count();
+        for i in 0..=count {
+            let id = history.add(&text(&format!("{i:02}")), None, 100).unwrap();
+            history.set_pinned(id, true).unwrap();
+        }
+        let keys: Vec<Option<char>> = pin_keys(&history).into_iter().map(|(_, key)| key).collect();
+        assert_eq!(keys[..count], PIN_KEYS.chars().map(Some).collect::<Vec<_>>()[..]);
+        assert_eq!(keys[count], None);
+    }
+
+    #[test]
+    fn migration_gives_existing_pins_keys_in_pin_order() {
+        let (dir, path) = temp_db("migrate-pins");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(SCHEMA_V1).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute_batch(MIGRATION_V3).unwrap();
+            for (text, pinned_at) in [("later", Some(20)), ("earlier", Some(10)), ("unpinned", None)] {
+                conn.execute(
+                    "INSERT INTO items (text, hash, first_copied, last_copied, pinned_at) VALUES (?1, 0, 1, 1, ?2)",
+                    params![text, pinned_at],
+                )
+                .unwrap();
+            }
+        }
+        let history = History::open(&path).unwrap();
+        assert_eq!(
+            pin_keys(&history),
+            [("earlier".into(), Some('b')), ("later".into(), Some('d')), ("unpinned".into(), None)]
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

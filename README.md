@@ -107,7 +107,8 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Enter / click | Copy the item (and paste it, if Paste Automatically is on) |
 | Alt+Enter | The opposite of Enter: copy and paste, or copy only |
 | Alt+Shift+Enter | Paste the item with the opposite of Paste Without Formatting: as plain text, unless that's on |
-| Ctrl+1 … Ctrl+9 | Pick the first nine items |
+| Ctrl+1 … Ctrl+9 | Pick the first nine unpinned items |
+| Ctrl+B, Ctrl+D, … | Pick a pinned item by the key shown on its row |
 | Alt+P | Pin or unpin (pinned items stay at the top) |
 | Alt+Delete | Delete the item |
 | Ctrl+Space | Show or hide the preview |
@@ -116,6 +117,11 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Ctrl+, | Open preferences |
 | Esc | Close |
 | Ctrl+Q | Quit (also stops offering formatted text picked earlier) |
+
+Each pinned item gets its own key, like in Maccy: the first free one of
+B D E F G H I J K L M N O P R S T U W, in that order. Unpinning frees the key
+for the next pin. The letters the search field uses with Ctrl (A, C, V, X, Y,
+Z) and Q (quit) aren't used. Past 19 pinned items, new pins get no key.
 
 Like Maccy's menu, the bottom of the popup has **Clear**, **Preferences…**,
 **About** and **Quit**. Click one, or press Tab until it's focused, then ↑ / ↓

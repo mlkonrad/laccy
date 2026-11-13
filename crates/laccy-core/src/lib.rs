@@ -149,6 +149,7 @@ mod tests {
             excerpt: excerpt.to_owned(),
             source_app: None,
             pinned: false,
+            pin_key: None,
             first_copied: 0,
             last_copied: 0,
             copy_count: 1,
