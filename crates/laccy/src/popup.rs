@@ -274,6 +274,18 @@ impl Popup {
             move |_, position| popup.pick(position, popup.config.paste_automatically, popup.config.paste_without_formatting)
         ));
 
+        // Both act on the selected item, which the preview shows.
+        self.preview.pin.connect_clicked(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| popup.toggle_pin()
+        ));
+        self.preview.delete.connect_clicked(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| popup.delete_selected()
+        ));
+
         self.footer.connect_row_activated(glib::clone!(
             #[weak(rename_to = popup)]
             self,
@@ -337,9 +349,9 @@ impl Popup {
             return glib::Propagation::Proceed;
         }
         let mods = state & gtk::accelerator_get_default_mod_mask();
-        // In the footer, reached with Tab, arrows move between its rows and Enter
-        // activates one instead of picking the selected item.
-        if self.footer.focus_child().is_some()
+        // In the footer or the preview's buttons, reached with Tab, arrows move
+        // between them and Enter activates one instead of picking the selected item.
+        if (self.footer.focus_child().is_some() || self.preview.toolbar.focus_child().is_some())
             && matches!(key, gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::Up | gdk::Key::Down)
         {
             return glib::Propagation::Proceed;
@@ -817,6 +829,11 @@ struct Preview {
     first_copied: gtk::Label,
     last_copied: gtk::Label,
     copies: gtk::Label,
+    /// Pin and Delete buttons for the item, like Maccy's preview toolbar.
+    toolbar: gtk::Box,
+    /// Pressed in while the item is pinned, as GNOME has no unpin icon.
+    pin: gtk::ToggleButton,
+    delete: gtk::Button,
 }
 
 impl Preview {
@@ -879,6 +896,27 @@ impl Preview {
         let copies = value_label();
         add_row("Copies", copies.upcast_ref());
 
+        // Clicks leave the focus in the search field, where typing goes on searching.
+        let pin = gtk::ToggleButton::builder()
+            .icon_name("view-pin-symbolic")
+            .focus_on_click(false)
+            .build();
+        pin.add_css_class("flat");
+        let delete = gtk::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .tooltip_text("Delete (Alt+Delete)")
+            .focus_on_click(false)
+            .build();
+        delete.add_css_class("flat");
+        let toolbar = gtk::Box::builder()
+            .spacing(6)
+            .halign(gtk::Align::End)
+            .margin_bottom(6)
+            .margin_end(6)
+            .build();
+        toolbar.append(&pin);
+        toolbar.append(&delete);
+
         let pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
         pane.set_width_request(PREVIEW_WIDTH);
         pane.set_visible(false);
@@ -886,6 +924,7 @@ impl Preview {
         pane.append(&picture);
         pane.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         pane.append(&grid);
+        pane.append(&toolbar);
 
         let separator = gtk::Separator::new(gtk::Orientation::Vertical);
         separator.set_visible(false);
@@ -905,6 +944,9 @@ impl Preview {
             first_copied,
             last_copied,
             copies,
+            toolbar,
+            pin,
+            delete,
         }
     }
 
@@ -953,6 +995,12 @@ impl Preview {
         self.first_copied.set_text(&item.map(|item| format_time(item.first_copied)).unwrap_or_default());
         self.last_copied.set_text(&item.map(|item| format_time(item.last_copied)).unwrap_or_default());
         self.copies.set_text(&item.map(|item| item.copy_count.to_string()).unwrap_or_default());
+
+        let pinned = item.is_some_and(|item| item.pinned);
+        self.pin.set_active(pinned);
+        self.pin.set_tooltip_text(Some(if pinned { "Unpin (Alt+P)" } else { "Pin (Alt+P)" }));
+        self.pin.set_sensitive(item.is_some());
+        self.delete.set_sensitive(item.is_some());
     }
 }
 

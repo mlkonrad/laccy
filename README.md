@@ -131,10 +131,11 @@ use **Pause Recording** for that.
 While you search, the matching text is highlighted. The **preview** shows
 the selected item in full next to the list: the whole text, the image at
 full size, or the paths of copied files, with the app it came from, when it
-was first and last copied, and how often. It opens with Ctrl+Space, or by
-itself once the selection rests for 1.5 seconds; after you close it, it
-waits for Ctrl+Space until the popup opens again. The popup widens to the
-right while it's open.
+was first and last copied, and how often. Its pin and trash buttons pin
+(or unpin) and delete the item, like Alt+P and Alt+Delete. It opens with
+Ctrl+Space, or by itself once the selection rests for 1.5 seconds; after
+you close it, it waits for Ctrl+Space until the popup opens again. The
+popup widens to the right while it's open.
 
 ## Top bar icon
 
