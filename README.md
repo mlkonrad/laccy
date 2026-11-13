@@ -5,9 +5,9 @@
 # Laccy
 
 A lightweight, keyboard-first clipboard manager for GNOME, inspired by
-[Maccy](https://github.com/p0deje/Maccy). Press **Shift+Super+C** (or click
-the clipboard icon in the top bar), type to search, press **Enter** to copy,
-then paste wherever you like.
+[Maccy](https://github.com/p0deje/Maccy). Click the clipboard icon in the top
+bar (or press a shortcut you set in [Preferences](#preferences)), type to
+search, press **Enter** to copy, then paste wherever you like.
 
 Laccy is an independent project. It is not affiliated with Maccy and doesn't
 share any code with it.
@@ -27,7 +27,7 @@ or type keys. Laccy is therefore three small parts:
    ├─ clipboard changed ──AddText/AddImage/AddFiles──▶ laccyd (Rust, no UI)
    │                                   └─ SQLite ~/.local/share/laccy/history.db
    ├─ top bar menu and label ──Clear/Latest──▶ laccyd
-   ├─ Shift+Super+C ──launches──▶ laccy popup (Rust, GTK 4 + libadwaita)
+   ├─ your shortcut ──launches──▶ laccy popup (Rust, GTK 4 + libadwaita)
    │                                   └─ reads the same database, reloads on laccyd's HistoryChanged
    └─ ◀──SetClipboard/SetContent── laccy, when an item is picked
         sets the clipboard, then sends Ctrl+V if asked
@@ -102,6 +102,12 @@ scripts/install-dev.sh     # builds, installs into ~/.local, links the extension
 
 The first time, log out and back in (GNOME Shell only discovers new extensions
 at login), then run `gnome-extensions enable laccy@mlkonrad.github.com`.
+Laccy has no shortcut until you set one under **Open Laccy** in
+[Preferences](#preferences); until then, click the clipboard icon in the top bar.
+
+The extension and the app are installed separately: extensions.gnome.org only
+hosts the extension, never programs. If the app is missing, the extension
+records nothing, and opening Laccy shows a notice that links here.
 
 `scripts/uninstall-dev.sh` removes everything except your history.
 
@@ -117,7 +123,7 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 
 | Keys | Action |
 |---|---|
-| Shift+Super+C | Open or close Laccy |
+| Your shortcut (none by default) | Open or close Laccy |
 | Type anything | Search |
 | ↑ / ↓ | Move the selection |
 | Enter / click | Copy the item (and paste it, if Paste Automatically is on) |
@@ -182,7 +188,7 @@ General, Appearance, History and About.
 
 General:
 
-- **Open Laccy:** the shortcut. Click it and press the new key combination.
+- **Open Laccy:** the shortcut. Click it and press the new key combination, or Backspace to remove it. None is set by default, because extensions.gnome.org doesn't let clipboard extensions come with one.
 - **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything, like Maccy (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Paste Automatically:** also paste after picking an item (off by default).
 - **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).

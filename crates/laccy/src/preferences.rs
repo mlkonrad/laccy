@@ -164,7 +164,7 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
     let group = adw::PreferencesGroup::new();
 
     let shortcut_label = gtk::ShortcutLabel::builder()
-        .disabled_text("Disabled")
+        .disabled_text("Not Set")
         .valign(gtk::Align::Center)
         .build();
     let show_shortcut = |settings: &gio::Settings, label: &gtk::ShortcutLabel| {
@@ -793,7 +793,7 @@ fn shortcut_dialog(settings: &gio::Settings) -> adw::Dialog {
     let status = adw::StatusPage::builder()
         .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
         .title("Press the New Shortcut")
-        .description("Esc to cancel, Backspace to disable")
+        .description("Esc to cancel, Backspace to remove the shortcut")
         .build();
     status.add_css_class("compact");
     let toolbar = adw::ToolbarView::new();

@@ -2,9 +2,11 @@
 <schemalist>
   <!-- Shared by the extension, the laccyd daemon and the laccy popup. -->
   <schema id="org.gnome.shell.extensions.laccy" path="/org/gnome/shell/extensions/laccy/">
-    <!-- Keybinding names are global across all extensions, so this one is prefixed. -->
+    <!-- Keybinding names are global across all extensions, so this one is prefixed.
+         Empty by default: extensions.gnome.org doesn't allow clipboard extensions
+         to ship default shortcuts. -->
     <key name="laccy-toggle-shortcut" type="as">
-      <default><![CDATA[['<Shift><Super>c']]]></default>
+      <default>[]</default>
       <summary>Open Laccy</summary>
       <description>Opens the clipboard history popup, or closes it when it is open.</description>
     </key>

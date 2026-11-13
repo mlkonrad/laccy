@@ -20,6 +20,8 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const APP_DESKTOP_ID = 'io.github.mlkonrad.Laccy.desktop';
+// Where the missing-app notice sends people to install the Laccy app.
+const INSTALL_URL = 'https://github.com/mlkonrad/laccy#build-and-install';
 // The popup window, told apart from the preferences window by its title.
 const APP_ID = 'io.github.mlkonrad.Laccy';
 const POPUP_TITLE = 'Laccy';
@@ -150,6 +152,37 @@ class ClearHistoryDialog extends ModalDialog.ModalDialog {
     }
 });
 
+// Shown instead of the popup or the preferences when the Laccy app, which
+// stores the history and draws the popup, isn't installed. extensions.gnome.org
+// only hosts the extension, so people can install it without the app.
+const MissingAppDialog = GObject.registerClass(
+class MissingAppDialog extends ModalDialog.ModalDialog {
+    constructor() {
+        super();
+        this.contentLayout.add_child(new Dialog.MessageDialogContent({
+            title: 'Laccy App Needed',
+            description: 'This extension keeps your clipboard history with the Laccy app, ' +
+                'which isn\'t installed. Until it is, nothing you copy is recorded.',
+        }));
+        this.setButtons([{
+            label: 'Close',
+            action: () => this.close(),
+            key: Clutter.KEY_Escape,
+        }, {
+            label: 'How to Install',
+            action: () => {
+                this.close();
+                try {
+                    Gio.AppInfo.launch_default_for_uri(INSTALL_URL, global.create_app_launch_context(0, -1));
+                } catch (e) {
+                    Main.notifyError('Laccy could not open the install instructions', e.message);
+                }
+            },
+            default: true,
+        }]);
+    }
+});
+
 // Top bar icon: left-click opens the clipboard history, right-click shows a
 // menu. Like Option-clicking Maccy's icon, Alt-click pauses or resumes
 // recording and Alt+Shift-click ignores the next copy.
@@ -239,6 +272,7 @@ export default class LaccyExtension extends Extension {
         this._openWhenClosed = false;
         this._settingClipboard = false;
         this._restoreIdleId = 0;
+        this._missingAppDialog = null;
 
         this._clipboard = St.Clipboard.get_default();
         this._selection = global.display.get_selection();
@@ -276,6 +310,8 @@ export default class LaccyExtension extends Extension {
         this._indicator?.destroy();
         this._indicator = null;
         this._syncLatestCopy();
+        this._missingAppDialog?.destroy();
+        this._missingAppDialog = null;
 
         this._dbus.unexport();
         this._dbus = null;
@@ -328,6 +364,10 @@ export default class LaccyExtension extends Extension {
             this._setIgnoreNext(false);
             return;
         }
+        // Without the app there is nothing to record into, so don't read the
+        // clipboard at all (and don't log a failed call on every copy).
+        if (!this._appInstalled())
+            return;
 
         // Windows without a desktop file get made-up IDs like "window:3"; don't record those.
         const focusAppId = Shell.WindowTracker.get_default().focus_app?.get_id() ?? '';
@@ -568,11 +608,15 @@ export default class LaccyExtension extends Extension {
                 openHistory: () => this._togglePopup(),
                 openPreferences: () => this._openPreferences(),
                 toggleIgnoreNext: () => this._setIgnoreNext(!this._ignoreNext),
-                clearHistory: () => new ClearHistoryDialog(includePinned => {
-                    this._callDaemon('Clear', new GLib.Variant('(b)', [includePinned]), 'clear the history');
-                    if (this._settings.get_boolean(CLEAR_SYSTEM_CLIPBOARD_KEY))
-                        this._clearClipboard();
-                }).open(),
+                clearHistory: () => {
+                    if (!this._lookupApp())
+                        return;
+                    new ClearHistoryDialog(includePinned => {
+                        this._callDaemon('Clear', new GLib.Variant('(b)', [includePinned]), 'clear the history');
+                        if (this._settings.get_boolean(CLEAR_SYSTEM_CLIPBOARD_KEY))
+                            this._clearClipboard();
+                    }).open();
+                },
             });
             this._indicator.setIgnoreNext(this._ignoreNext);
             Main.panel.addToStatusArea(this.uuid, this._indicator);
@@ -600,7 +644,7 @@ export default class LaccyExtension extends Extension {
     }
 
     _refreshLatestCopy() {
-        if (!this._historyChangedId)
+        if (!this._historyChangedId || !this._appInstalled())
             return;
         Gio.DBus.session.call(
             DAEMON_BUS_NAME, DAEMON_OBJECT_PATH, DAEMON_INTERFACE, 'Latest', null,
@@ -618,11 +662,21 @@ export default class LaccyExtension extends Extension {
             });
     }
 
+    // GNOME watches the app folders, so this notices the app being installed
+    // or removed while the session runs.
+    _appInstalled() {
+        return Shell.AppSystem.get_default().lookup_app(APP_DESKTOP_ID) !== null;
+    }
+
+    // The Laccy app, or null after telling the user it's missing.
     _lookupApp() {
         const app = Shell.AppSystem.get_default().lookup_app(APP_DESKTOP_ID);
-        if (!app) {
-            Main.notifyError('Laccy is not installed',
-                `${APP_DESKTOP_ID} was not found. Run scripts/install-dev.sh.`);
+        if (!app && !this._missingAppDialog) {
+            this._missingAppDialog = new MissingAppDialog();
+            this._missingAppDialog.connect('destroy', () => {
+                this._missingAppDialog = null;
+            });
+            this._missingAppDialog.open();
         }
         return app;
     }

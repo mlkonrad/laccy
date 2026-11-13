@@ -36,12 +36,12 @@ busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DB
 
 if gnome-extensions info "$uuid" >/dev/null 2>&1; then
     gnome-extensions enable "$uuid"
-    echo "Laccy installed and extension enabled. Press Shift+Super+C."
+    echo "Laccy installed and extension enabled. Click the clipboard icon in the top bar, or set a shortcut in Preferences."
 else
     cat <<EOF
 Laccy installed. GNOME Shell only discovers new extensions at login, so:
   1. Log out and back in.
   2. Run: gnome-extensions enable $uuid
-  3. Press Shift+Super+C.
+  3. Click the clipboard icon in the top bar, or set a shortcut in Preferences.
 EOF
 fi
