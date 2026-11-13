@@ -18,7 +18,7 @@ pub const THUMBNAIL_MAX_HEIGHT: i32 = 96;
 /// How many thumbnail pixels the popup draws per logical pixel.
 pub const THUMBNAIL_SCALE: i32 = 2;
 
-/// The size of the thumbnail of a `width` × `height` image: scaled down,
+/// The size of the thumbnail of a `width` x `height` image: scaled down,
 /// keeping its aspect ratio, to fit the maximum thumbnail size.
 pub fn thumbnail_size(width: i32, height: i32) -> (i32, i32) {
     let scale = (f64::from(THUMBNAIL_MAX_WIDTH) / f64::from(width.max(1)))
@@ -130,8 +130,8 @@ pub(crate) fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
 
 /// A single line of `text` for a popup row, cut to `max_chars` characters.
 /// Without `special_symbols` it's the [`preview`]. With them, whitespace shows
-/// like in Maccy: leading and trailing spaces as `·`, line breaks as `⏎` and
-/// tabs as `⇥`.
+/// like in Maccy: leading and trailing spaces as a middle dot (U+00B7), line
+/// breaks as a return symbol (U+23CE) and tabs as a tab arrow (U+21E5).
 pub fn display_text(text: &str, max_chars: usize, special_symbols: bool) -> String {
     if !special_symbols {
         return preview(text, max_chars);
