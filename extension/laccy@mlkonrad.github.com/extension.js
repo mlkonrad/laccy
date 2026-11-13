@@ -288,8 +288,10 @@ export default class LaccyExtension extends Extension {
         this._indicator?.destroy();
         this._indicator = null;
         this._syncLatestCopy();
+        this._missingAppDialog?.disconnectObject(this);
         this._missingAppDialog?.destroy();
         this._missingAppDialog = null;
+        this._clearDialog?.disconnectObject(this);
         this._clearDialog?.destroy();
         this._clearDialog = null;
 
@@ -588,9 +590,9 @@ export default class LaccyExtension extends Extension {
             if (this._settings.get_boolean(CLEAR_SYSTEM_CLIPBOARD_KEY))
                 this._clearClipboard();
         });
-        this._clearDialog.connect('destroy', () => {
+        this._clearDialog.connectObject('destroy', () => {
             this._clearDialog = null;
-        });
+        }, this);
         this._clearDialog.open();
     }
 
@@ -636,9 +638,9 @@ export default class LaccyExtension extends Extension {
         const app = Shell.AppSystem.get_default().lookup_app(APP_DESKTOP_ID);
         if (!app && !this._missingAppDialog) {
             this._missingAppDialog = new MissingAppDialog();
-            this._missingAppDialog.connect('destroy', () => {
+            this._missingAppDialog.connectObject('destroy', () => {
                 this._missingAppDialog = null;
-            });
+            }, this);
             this._missingAppDialog.open();
         }
         return app;
