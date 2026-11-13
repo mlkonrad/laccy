@@ -216,6 +216,9 @@ impl History {
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
         // Per connection, and not inside a transaction. Deletes formats with their item.
         conn.pragma_update(None, "foreign_keys", true)?;
+        // Overwrites deleted items with zeros, so cleared copies can't be read
+        // back from free space in the file. Per connection too.
+        conn.pragma_update(None, "secure_delete", true)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         // Read inside the transaction, so the daemon and the popup can't both migrate.
         let version: i32 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -236,6 +239,16 @@ impl History {
             tx.execute_batch(MIGRATION_V5)?;
         }
         tx.commit()?;
+        if version < 6 {
+            // Files from before secure_delete keep deleted and replaced items in
+            // their free space. Rewriting the file once drops them. VACUUM can't
+            // run in a transaction, so if another process is busy it's retried
+            // on the next open; a second run by a racing process is harmless.
+            match conn.execute_batch("VACUUM; PRAGMA user_version = 6;") {
+                Ok(()) => {}
+                Err(err) => eprintln!("laccy: cannot compact the history yet: {err}"),
+            }
+        }
         Ok(Self { conn })
     }
 
@@ -490,11 +503,16 @@ impl History {
 
     /// Removes all unpinned items, or every item when `include_pinned` is set.
     pub fn clear(&self, include_pinned: bool) -> Result<usize> {
-        if include_pinned {
-            self.conn.execute("DELETE FROM items", [])
+        let removed = if include_pinned {
+            self.conn.execute("DELETE FROM items", [])?
         } else {
-            self.conn.execute("DELETE FROM items WHERE pinned_at IS NULL", [])
-        }
+            self.conn.execute("DELETE FROM items WHERE pinned_at IS NULL", [])?
+        };
+        // The write-ahead log still holds the pages as they were before. Moving
+        // them into the file and emptying the log drops those copies; another
+        // process reading at that moment only delays it to a later checkpoint.
+        self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(removed)
     }
 }
 
@@ -780,6 +798,33 @@ mod tests {
         assert_eq!(history.add(&text("old"), None, 10).unwrap(), items[0].id);
         history.set_formats(items[0].id, &[html("<b>old</b>")]).unwrap();
         assert_eq!(history.formats(items[0].id).unwrap(), [html("<b>old</b>")]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn opening_compacts_items_deleted_before_secure_delete() {
+        let (dir, path) = temp_db("vacuum");
+        let contains = |needle: &[u8]| {
+            std::fs::read_dir(&dir).unwrap().any(|entry| {
+                let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+                bytes.windows(needle.len()).any(|w| w == needle)
+            })
+        };
+        {
+            let conn = Connection::open(&path).unwrap();
+            for migration in [SCHEMA_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5] {
+                conn.execute_batch(migration).unwrap();
+            }
+            conn.execute("INSERT INTO items (text, hash, first_copied, last_copied) VALUES ('kept', 0, 1, 1)", [])
+                .unwrap();
+            conn.execute("INSERT INTO items (text, hash, first_copied, last_copied) VALUES ('leftover-7e1b', 0, 2, 2)", [])
+                .unwrap();
+            conn.execute("DELETE FROM items WHERE text = 'leftover-7e1b'", []).unwrap();
+        }
+        assert!(contains(b"leftover-7e1b"), "the old file should still hold the deleted text");
+        drop(History::open(&path).unwrap());
+        assert!(!contains(b"leftover-7e1b"));
+        assert_eq!(texts(&History::open(&path).unwrap()), ["kept"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

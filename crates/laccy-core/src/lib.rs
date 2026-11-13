@@ -47,6 +47,51 @@ pub const SHELL_BUS_NAME: &str = "org.gnome.Shell";
 pub const SHELL_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Shell";
 pub const SHELL_INTERFACE: &str = "io.github.mlkonrad.Laccy.Shell1";
 
+/// Marks that this login has started. `$XDG_RUNTIME_DIR` is emptied when the
+/// user logs out and when the computer shuts down, even without a clean
+/// shutdown, so a missing marker means a new login.
+fn login_marker_path() -> Option<PathBuf> {
+    let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+    dir.is_absolute().then(|| dir.join("laccy-login"))
+}
+
+/// Run when `laccyd` or the popup starts. The first of them in a login marks
+/// it, and with `clear_on_logout` removes the unpinned items left from the
+/// last login, like Maccy's "Clear history on quit". Laccy can't do it at
+/// logout itself: nothing of it reliably runs then, and laccyd is also stopped
+/// when it's reinstalled. Returns whether it cleared.
+pub fn clear_if_new_login(history: &history::History, clear_on_logout: bool) -> bool {
+    let Some(marker) = login_marker_path() else {
+        return false;
+    };
+    match clear_if_new_login_at(&marker, history, clear_on_logout) {
+        Ok(cleared) => cleared,
+        Err(err) => {
+            eprintln!("laccy: cannot check for a new login: {err}");
+            false
+        }
+    }
+}
+
+fn clear_if_new_login_at(
+    marker: &std::path::Path,
+    history: &history::History,
+    clear_on_logout: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    // Created whatever the setting, so turning it on mid-login doesn't clear
+    // right away. Only one process can create it, so only one clears.
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(marker) {
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(err) => return Err(err.into()),
+    }
+    if !clear_on_logout {
+        return Ok(false);
+    }
+    history.clear(false)?;
+    Ok(true)
+}
+
 pub fn history_path() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share").join("laccy/history.db")
 }
@@ -138,7 +183,8 @@ pub fn preview(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::history::{Item, Kind};
+    use super::history::{Content, History, Item, Kind, PinPosition, SortOrder};
+    use super::clear_if_new_login_at;
     use super::{display_text, hex_color, latest_copy_label, preview, thumbnail_size};
 
     #[test]
@@ -201,5 +247,52 @@ mod tests {
         assert_eq!(preview("hello world", 5), "hello…");
         assert_eq!(preview("hello", 5), "hello");
         assert_eq!(preview("héllo wörld", 7), "héllo w…");
+    }
+
+    #[test]
+    fn only_a_new_login_clears_and_only_when_asked() {
+        let dir = std::env::temp_dir().join(format!("laccy-test-login-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("laccy-login");
+        let mut history = History::open_in_memory().unwrap();
+        let texts = |history: &History| -> Vec<String> {
+            history.items(SortOrder::LastCopied, PinPosition::Top).unwrap().into_iter().map(|item| item.excerpt).collect()
+        };
+        let pinned = history.add(&Content::Text("pinned".into()), None, 10).unwrap();
+        history.set_pinned(pinned, true).unwrap();
+        history.add(&Content::Text("copied".into()), None, 10).unwrap();
+
+        // Off: the login is marked, nothing is cleared, and turning it on later
+        // in the same login doesn't clear either.
+        assert!(!clear_if_new_login_at(&marker, &history, false).unwrap());
+        assert!(!clear_if_new_login_at(&marker, &history, true).unwrap());
+        assert_eq!(texts(&history), ["pinned", "copied"]);
+
+        // The next login (the marker is gone) keeps only pinned items.
+        std::fs::remove_file(&marker).unwrap();
+        assert!(clear_if_new_login_at(&marker, &history, true).unwrap());
+        assert_eq!(texts(&history), ["pinned"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cleared_items_leave_no_trace_in_the_file() {
+        let dir = std::env::temp_dir().join(format!("laccy-test-secure-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.db");
+        {
+            let mut history = History::open(&path).unwrap();
+            history.add(&Content::Text("kept".into()), None, 10).unwrap();
+            history.add(&Content::Text("secret-4f9d2c".into()), None, 10).unwrap();
+            let kept = history.items(SortOrder::LastCopied, PinPosition::Top).unwrap()[1].id;
+            history.set_pinned(kept, true).unwrap();
+            history.clear(false).unwrap();
+            // Still open, as laccyd keeps it: the file and its log must already be clean.
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+                assert!(!bytes.windows(13).any(|w| w == b"secret-4f9d2c"));
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

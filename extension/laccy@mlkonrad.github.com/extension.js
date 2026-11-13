@@ -46,6 +46,7 @@ const SHELL_INTERFACE_XML = `
       <arg name="paste" type="b" direction="in"/>
     </method>
     <method name="Paste"/>
+    <method name="ClearClipboard"/>
   </interface>
 </node>`;
 
@@ -94,6 +95,7 @@ const RECORD_TEXT_KEY = 'record-text';
 const RECORD_IMAGES_KEY = 'record-images';
 const RECORD_FILES_KEY = 'record-files';
 const SHOW_LATEST_COPY_KEY = 'show-latest-copy';
+const CLEAR_SYSTEM_CLIPBOARD_KEY = 'clear-system-clipboard';
 const HISTORY_CHANGED_SIGNAL = 'HistoryChanged';
 const INDICATOR_ICON = 'edit-paste-symbolic';
 // The icon's opacity while recording is paused.
@@ -549,8 +551,11 @@ export default class LaccyExtension extends Extension {
                 openHistory: () => this._togglePopup(),
                 openPreferences: () => this._openPreferences(),
                 toggleIgnoreNext: () => this._setIgnoreNext(!this._ignoreNext),
-                clearHistory: () => new ClearHistoryDialog(includePinned =>
-                    this._callDaemon('Clear', new GLib.Variant('(b)', [includePinned]), 'clear the history')).open(),
+                clearHistory: () => new ClearHistoryDialog(includePinned => {
+                    this._callDaemon('Clear', new GLib.Variant('(b)', [includePinned]), 'clear the history');
+                    if (this._settings.get_boolean(CLEAR_SYSTEM_CLIPBOARD_KEY))
+                        this.ClearClipboard();
+                }).open(),
             });
             this._indicator.setIgnoreNext(this._ignoreNext);
             Main.panel.addToStatusArea(this.uuid, this._indicator);
@@ -677,6 +682,14 @@ export default class LaccyExtension extends Extension {
     // clipboard itself.
     Paste() {
         this._pasteIfAllowed(true);
+    }
+
+    // D-Bus method, called by the popup after it cleared the history with
+    // "Clear the Clipboard Too" on. Empty text replaces what was copied:
+    // removing the owner instead would make GNOME put back its saved copy.
+    // Like a pick, it isn't recorded.
+    ClearClipboard() {
+        this._setClipboard(() => this._clipboard.set_text(St.ClipboardType.CLIPBOARD, ''));
     }
 
     // Setting the clipboard emits owner-changed right away, which this flag

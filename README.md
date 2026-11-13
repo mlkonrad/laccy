@@ -66,7 +66,9 @@ apps or copies matching a pattern, like API keys (see [Preferences](#preferences
 You can also pause recording, or skip just the next copy, from the
 [top bar icon](#top-bar-icon). Nothing is recorded while the
 screen is locked, because GNOME disables extensions then. History never
-leaves your machine.
+leaves your machine. Deleted and cleared items are overwritten with zeros in
+the history file (SQLite's `secure_delete`), so they can't be recovered from
+it afterwards.
 
 ## Images, files and formatted text
 
@@ -188,6 +190,8 @@ History:
 - **History Size:** unpinned items to keep (200 by default).
 - **Sort By:** Last Copied, First Copied or Number of Copies (Last Copied by default), for items that aren't pinned.
 - **Pinned Items:** list pinned items at the Top or the Bottom, in the order you pinned them (Top by default).
+- **Clear History on Logout:** start each login with only your pinned items, like Maccy's "Clear history on quit" (off by default). Laccy clears when it first starts after you log in again, so it also works after a shutdown, a crash or a power cut; until then the old history stays in the history file.
+- **Clear the Clipboard Too:** clearing the history, from the popup or the top bar menu, also empties what's currently copied (off by default).
 - **Save Text, Save Images, Save Files:** which kinds of copies are recorded (all on by default).
 - **Ignored Apps:** apps whose copies are never recorded.
 - **Ignored Patterns:** regular expressions; text copies, and file copies by their paths, that match one are never recorded. Patterns are case-sensitive unless they start with `(?i)`, so `(?i)^sk-` skips keys starting with `sk-` or `SK-`.

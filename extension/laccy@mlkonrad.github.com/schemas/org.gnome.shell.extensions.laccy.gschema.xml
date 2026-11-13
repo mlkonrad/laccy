@@ -84,6 +84,16 @@
       <summary>Pin to</summary>
       <description>Whether pinned items are listed above or below the other items, in the order they were pinned.</description>
     </key>
+    <key name="clear-on-logout" type="b">
+      <default>false</default>
+      <summary>Clear history on logout</summary>
+      <description>Removes unpinned items from the previous login. Laccy does it when it first starts after you log in again, which also covers shutdowns and crashes.</description>
+    </key>
+    <key name="clear-system-clipboard" type="b">
+      <default>false</default>
+      <summary>Clear the system clipboard too</summary>
+      <description>Whenever the history is cleared, also empties what is currently copied.</description>
+    </key>
     <key name="highlight-matches" type="s">
       <choices>
         <choice value="bold"/>

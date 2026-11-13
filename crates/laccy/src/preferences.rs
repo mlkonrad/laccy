@@ -4,7 +4,7 @@
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
-    self, HIGHLIGHT_MATCHES_KEY, HISTORY_SIZE_KEY, Highlight, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY,
+    self, CLEAR_ON_LOGOUT_KEY, CLEAR_SYSTEM_CLIPBOARD_KEY, HIGHLIGHT_MATCHES_KEY, HISTORY_SIZE_KEY, Highlight, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY,
     PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, PREVIEW_AUTOMATICALLY_KEY, PREVIEW_DELAY_KEY,
     RECORD_FILES_KEY, RECORD_IMAGES_KEY,
     RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
@@ -256,6 +256,21 @@ fn history_group(settings: &gio::Settings) -> adw::PreferencesGroup {
     pin_row.set_title("Pinned Items");
     pin_row.set_subtitle("Where pinned items are listed");
     group.add(&pin_row);
+
+    // Laccy clears when it next starts after a login, see laccy_core::clear_if_new_login.
+    let logout_row = adw::SwitchRow::builder()
+        .title("Clear History on Logout")
+        .subtitle("Start each login with only your pinned items")
+        .build();
+    settings.bind(CLEAR_ON_LOGOUT_KEY, &logout_row, "active").build();
+    group.add(&logout_row);
+
+    let clipboard_row = adw::SwitchRow::builder()
+        .title("Clear the Clipboard Too")
+        .subtitle("Clearing the history also empties what's currently copied")
+        .build();
+    settings.bind(CLEAR_SYSTEM_CLIPBOARD_KEY, &clipboard_row, "active").build();
+    group.add(&clipboard_row);
 
     for (key, title) in [(RECORD_TEXT_KEY, "Save Text"), (RECORD_IMAGES_KEY, "Save Images"), (RECORD_FILES_KEY, "Save Files")] {
         let row = adw::SwitchRow::builder().title(title).build();

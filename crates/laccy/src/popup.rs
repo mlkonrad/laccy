@@ -90,7 +90,9 @@ impl Popup {
                 return;
             }
         };
-        let popup = Rc::new(Self::build(app, Rc::new(history), Config::load()));
+        let config = Config::load();
+        laccy_core::clear_if_new_login(&history, config.clear_on_logout);
+        let popup = Rc::new(Self::build(app, Rc::new(history), config));
         // Signal handlers only hold weak references, so the window has to keep
         // the popup alive; otherwise every handler silently does nothing.
         let keep_alive = RefCell::new(Some(Rc::clone(&popup)));
@@ -771,6 +773,8 @@ impl Popup {
                 move |_, _| {
                     if let Err(err) = popup.history.clear(include_pinned) {
                         eprintln!("laccy: cannot clear history: {err}");
+                    } else if popup.config.clear_system_clipboard {
+                        popup.clear_clipboard();
                     }
                     popup.reload();
                 }
@@ -783,6 +787,30 @@ impl Popup {
         ));
         self.dialog_open.set(true);
         dialog.present(Some(&self.window));
+    }
+
+    /// Asks the extension to empty the clipboard, which only gnome-shell can
+    /// do for whatever app copied last.
+    fn clear_clipboard(&self) {
+        let Some(connection) = self.window.application().and_then(|app| app.dbus_connection()) else {
+            return;
+        };
+        connection.call(
+            Some(SHELL_BUS_NAME),
+            SHELL_OBJECT_PATH,
+            SHELL_INTERFACE,
+            "ClearClipboard",
+            None,
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            gio::Cancellable::NONE,
+            |result| {
+                if let Err(err) = result {
+                    eprintln!("laccy: the GNOME Shell extension's ClearClipboard call failed: {err}");
+                }
+            },
+        );
     }
 
     fn open_preferences(&self) {

@@ -32,6 +32,9 @@ pub const MAX_IMAGE_BYTES_KEY: &str = "max-image-bytes";
 pub const SEARCH_MODE_KEY: &str = "search-mode";
 pub const SORT_BY_KEY: &str = "sort-by";
 pub const PIN_TO_KEY: &str = "pin-to";
+pub const CLEAR_ON_LOGOUT_KEY: &str = "clear-on-logout";
+/// Also read by the extension, which clears the clipboard when its menu clears the history.
+pub const CLEAR_SYSTEM_CLIPBOARD_KEY: &str = "clear-system-clipboard";
 pub const HIGHLIGHT_MATCHES_KEY: &str = "highlight-matches";
 pub const SHOW_SPECIAL_SYMBOLS_KEY: &str = "show-special-symbols";
 pub const SHOW_COLOR_SWATCHES_KEY: &str = "show-color-swatches";
@@ -100,6 +103,10 @@ pub struct Config {
     pub sort_by: SortOrder,
     /// Whether pinned items are listed above or below the others.
     pub pin_to: PinPosition,
+    /// Remove unpinned items at the start of each login, see [`crate::clear_if_new_login`].
+    pub clear_on_logout: bool,
+    /// Empty the clipboard too whenever the history is cleared.
+    pub clear_system_clipboard: bool,
     /// How the popup marks the text a search matched.
     pub highlight_matches: Highlight,
     /// Show whitespace as symbols in the popup, see [`crate::display_text`].
@@ -131,6 +138,8 @@ impl Default for Config {
             search_mode: search::Mode::Exact,
             sort_by: SortOrder::LastCopied,
             pin_to: PinPosition::Top,
+            clear_on_logout: false,
+            clear_system_clipboard: false,
             highlight_matches: Highlight::Bold,
             show_special_symbols: true,
             show_color_swatches: true,
@@ -162,6 +171,8 @@ impl Config {
             search_mode: search::Mode::from_name(&settings.string(SEARCH_MODE_KEY)).unwrap_or_default(),
             sort_by: SortOrder::from_name(&settings.string(SORT_BY_KEY)).unwrap_or_default(),
             pin_to: PinPosition::from_name(&settings.string(PIN_TO_KEY)).unwrap_or_default(),
+            clear_on_logout: settings.boolean(CLEAR_ON_LOGOUT_KEY),
+            clear_system_clipboard: settings.boolean(CLEAR_SYSTEM_CLIPBOARD_KEY),
             highlight_matches: Highlight::from_name(&settings.string(HIGHLIGHT_MATCHES_KEY)).unwrap_or_default(),
             show_special_symbols: settings.boolean(SHOW_SPECIAL_SYMBOLS_KEY),
             show_color_swatches: settings.boolean(SHOW_COLOR_SWATCHES_KEY),

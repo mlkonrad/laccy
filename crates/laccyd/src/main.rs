@@ -57,6 +57,9 @@ fn main() -> glib::ExitCode {
     if settings.is_none() {
         eprintln!("laccyd: the extension's settings schema was not found; using default settings");
     }
+    // Before taking the bus name, so the extension's first calls already see the cleared history.
+    let config = settings.as_ref().map_or_else(Config::default, Config::from_settings);
+    laccy_core::clear_if_new_login(&history.borrow(), config.clear_on_logout);
 
     let main_loop = glib::MainLoop::new(None, false);
     let owner_id = gio::bus_own_name(
