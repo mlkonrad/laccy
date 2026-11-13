@@ -122,6 +122,9 @@ pub struct Item {
     /// The pinned item's key from [`PIN_KEYS`]. `None` when unpinned, or when
     /// every key was taken as it was pinned.
     pub pin_key: Option<char>,
+    /// The pinned item's name, shown instead of its content. `None` when
+    /// unpinned or unnamed.
+    pub name: Option<String>,
     /// When it was first and last copied, in milliseconds since the Unix epoch.
     pub first_copied: i64,
     pub last_copied: i64,
@@ -180,6 +183,12 @@ ALTER TABLE items ADD COLUMN pin_key TEXT;
 PRAGMA user_version = 4;
 ";
 
+/// Names for pinned items, see [`History::edit_pin`].
+const MIGRATION_V5: &str = "
+ALTER TABLE items ADD COLUMN name TEXT;
+PRAGMA user_version = 5;
+";
+
 pub struct History {
     conn: Connection,
 }
@@ -222,6 +231,9 @@ impl History {
         if version < 4 {
             tx.execute_batch(MIGRATION_V4)?;
             assign_missing_pin_keys(&tx)?;
+        }
+        if version < 5 {
+            tx.execute_batch(MIGRATION_V5)?;
         }
         tx.commit()?;
         Ok(Self { conn })
@@ -300,7 +312,7 @@ impl History {
         };
         let mut stmt = self.conn.prepare(&format!(
             "SELECT id, kind, substr(text, 1, ?1), source_app, pinned_at IS NOT NULL, first_copied, last_copied, copy_count,
-                    pin_key
+                    pin_key, name
              FROM items
              ORDER BY pinned_at IS NULL {pins_first}, pinned_at, {}",
             order.order_by()
@@ -313,6 +325,7 @@ impl History {
                 source_app: row.get(3)?,
                 pinned: row.get(4)?,
                 pin_key: row.get::<_, Option<String>>(8)?.and_then(|key| key.chars().next()),
+                name: row.get(9)?,
                 first_copied: row.get(5)?,
                 last_copied: row.get(6)?,
                 copy_count: row.get(7)?,
@@ -339,6 +352,7 @@ impl History {
                         source_app: row.get(3)?,
                         pinned: false,
                         pin_key: None,
+                        name: None,
                         first_copied: row.get(4)?,
                         last_copied: row.get(5)?,
                         copy_count: row.get(6)?,
@@ -411,20 +425,46 @@ impl History {
     }
 
     /// Pins or unpins an item. A newly pinned item gets the first free key
-    /// from [`PIN_KEYS`]; an unpinned one gives its key back.
+    /// from [`PIN_KEYS`]; an unpinned one gives its key back and loses its name.
     pub fn set_pinned(&self, id: i64, pinned: bool) -> Result<()> {
         // Immediate, so two popups can't hand out the same key. Unchecked, as
         // the popup shares the history; nothing else uses it meanwhile.
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
-        tx.execute(
-            "UPDATE items
-             SET pinned_at = CASE WHEN ?2 THEN COALESCE(pinned_at, ?3) END,
-                 pin_key = CASE WHEN ?2 THEN pin_key END
-             WHERE id = ?1",
-            params![id, pinned, now_millis()],
-        )?;
         if pinned {
-            assign_missing_pin_keys(&tx)?;
+            // Only a newly pinned item gets a key: a pin set to no key keeps none.
+            let key = free_pin_keys(&tx)?.first().map(char::to_string);
+            tx.execute(
+                "UPDATE items SET pinned_at = ?2, pin_key = ?3 WHERE id = ?1 AND pinned_at IS NULL",
+                params![id, now_millis(), key],
+            )?;
+        } else {
+            tx.execute("UPDATE items SET pinned_at = NULL, pin_key = NULL, name = NULL WHERE id = ?1", params![id])?;
+        }
+        tx.commit()
+    }
+
+    /// The keys from [`PIN_KEYS`] no pinned item has, in order.
+    pub fn free_pin_keys(&self) -> Result<Vec<char>> {
+        free_pin_keys(&self.conn)
+    }
+
+    /// Renames a pinned item and changes its key. A blank `name` removes the
+    /// name; `None` for `key` leaves the item without one. A key not in
+    /// [`PIN_KEYS`] is ignored, and one another item has moves to this one.
+    /// Does nothing to an unpinned item.
+    pub fn edit_pin(&self, id: i64, name: &str, key: Option<char>) -> Result<()> {
+        let name = Some(name.trim()).filter(|name| !name.is_empty());
+        let key = key.filter(|key| PIN_KEYS.contains(*key)).map(|key| key.to_string());
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let pinned: bool = tx
+            .query_row("SELECT pinned_at IS NOT NULL FROM items WHERE id = ?1", params![id], |row| row.get(0))
+            .optional()?
+            .unwrap_or(false);
+        if pinned {
+            if key.is_some() {
+                tx.execute("UPDATE items SET pin_key = NULL WHERE pin_key = ?1 AND id != ?2", params![key, id])?;
+            }
+            tx.execute("UPDATE items SET name = ?2, pin_key = ?3 WHERE id = ?1", params![id, name, key])?;
         }
         tx.commit()
     }
@@ -447,11 +487,7 @@ impl History {
 /// Gives pinned items without a key the free keys from [`PIN_KEYS`], earliest
 /// pinned first, until they run out.
 fn assign_missing_pin_keys(tx: &Transaction) -> Result<()> {
-    let used: String = tx
-        .prepare("SELECT pin_key FROM items WHERE pin_key IS NOT NULL")?
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<_>>()?;
-    let mut free = PIN_KEYS.chars().filter(|key| !used.contains(*key));
+    let mut free = free_pin_keys(tx)?.into_iter();
     let missing: Vec<i64> = tx
         .prepare("SELECT id FROM items WHERE pinned_at IS NOT NULL AND pin_key IS NULL ORDER BY pinned_at, id")?
         .query_map([], |row| row.get(0))?
@@ -460,6 +496,15 @@ fn assign_missing_pin_keys(tx: &Transaction) -> Result<()> {
         tx.execute("UPDATE items SET pin_key = ?1 WHERE id = ?2", params![key.to_string(), id])?;
     }
     Ok(())
+}
+
+/// The keys from [`PIN_KEYS`] no item has, in order.
+fn free_pin_keys(conn: &Connection) -> Result<Vec<char>> {
+    let used: String = conn
+        .prepare("SELECT pin_key FROM items WHERE pin_key IS NOT NULL")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<_>>()?;
+    Ok(PIN_KEYS.chars().filter(|key| !used.contains(*key)).collect())
 }
 
 /// Strictly increasing, so copies within the same millisecond keep their order.
@@ -748,6 +793,45 @@ mod tests {
         history.set_pinned(a, false).unwrap();
         history.set_pinned(c, true).unwrap();
         assert_eq!(pin_keys(&history), [("a".into(), None), ("b".into(), Some('d')), ("c".into(), Some('b'))]);
+    }
+
+    fn pin(history: &History, id: i64) -> (Option<String>, Option<char>) {
+        let item = history.items(SortOrder::LastCopied, PinPosition::Top).unwrap().into_iter().find(|item| item.id == id);
+        let item = item.unwrap();
+        (item.name, item.pin_key)
+    }
+
+    #[test]
+    fn edit_pin_renames_and_rekeys() {
+        let mut history = History::open_in_memory().unwrap();
+        let a = history.add(&text("a"), None, 10).unwrap();
+        let b = history.add(&text("b"), None, 10).unwrap();
+        let c = history.add(&text("c"), None, 10).unwrap();
+        history.set_pinned(a, true).unwrap();
+        history.set_pinned(b, true).unwrap();
+        assert_eq!(history.free_pin_keys().unwrap()[..2], ['e', 'f']);
+
+        history.edit_pin(a, "  Work email ", Some('x')).unwrap();
+        // X isn't a pin key, so A loses its key.
+        assert_eq!(pin(&history, a), (Some("Work email".into()), None));
+        // Taking B's key moves it.
+        history.edit_pin(a, "Work email", Some('d')).unwrap();
+        assert_eq!(pin(&history, a), (Some("Work email".into()), Some('d')));
+        assert_eq!(pin(&history, b), (None, None));
+
+        // A pin left without a key keeps none when another item is pinned.
+        history.set_pinned(c, true).unwrap();
+        assert_eq!(pin(&history, b), (None, None));
+        assert_eq!(pin(&history, c), (None, Some('b')));
+
+        // A blank name removes it, and unpinned items can't be edited.
+        history.edit_pin(a, "  ", Some('d')).unwrap();
+        assert_eq!(pin(&history, a), (None, Some('d')));
+        history.edit_pin(a, "Again", Some('d')).unwrap();
+        history.set_pinned(a, false).unwrap();
+        assert_eq!(pin(&history, a), (None, None));
+        history.edit_pin(a, "Unpinned", Some('e')).unwrap();
+        assert_eq!(pin(&history, a), (None, None));
     }
 
     #[test]

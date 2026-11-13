@@ -150,6 +150,7 @@ mod tests {
             source_app: None,
             pinned: false,
             pin_key: None,
+            name: None,
             first_copied: 0,
             last_copied: 0,
             copy_count: 1,

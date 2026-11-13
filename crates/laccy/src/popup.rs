@@ -285,6 +285,11 @@ impl Popup {
             self,
             move |_| popup.delete_selected()
         ));
+        self.preview.edit.connect_clicked(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| popup.edit_pin()
+        ));
 
         self.footer.connect_row_activated(glib::clone!(
             #[weak(rename_to = popup)]
@@ -373,6 +378,7 @@ impl Popup {
                 self.pick(self.selection.selected(), true, !plain)
             }
             gdk::Key::p | gdk::Key::P if mods == Mod::ALT_MASK => self.toggle_pin(),
+            gdk::Key::e | gdk::Key::E if mods == Mod::ALT_MASK => self.edit_pin(),
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::ALT_MASK => self.delete_selected(),
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::SHIFT_MASK => {
                 self.confirm_clear(false)
@@ -591,6 +597,69 @@ impl Popup {
                 drop(hold);
             },
         );
+    }
+
+    /// Asks for the selected pinned item's name and key, like Maccy's item editor.
+    fn edit_pin(self: &Rc<Self>) {
+        let Some((id, name, key)) = self
+            .item_at(self.selection.selected(), |item| item.pinned.then(|| (item.id, item.name.clone(), item.pin_key)))
+            .flatten()
+        else {
+            return;
+        };
+        let free_keys = self.history.free_pin_keys().unwrap_or_else(|err| {
+            eprintln!("laccy: cannot read pin keys: {err}");
+            Vec::new()
+        });
+        // No key, this item's key, then the free ones in the order they're handed out.
+        let mut keys: Vec<Option<char>> = vec![None];
+        keys.extend(laccy_core::history::PIN_KEYS.chars().filter(|c| Some(*c) == key || free_keys.contains(c)).map(Some));
+        let labels: Vec<String> = keys
+            .iter()
+            .map(|key| key.map_or_else(|| "None".to_owned(), |key| format!("Ctrl+{}", key.to_ascii_uppercase())))
+            .collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+
+        let name_row = adw::EntryRow::builder().title("Name").text(name.as_deref().unwrap_or("")).build();
+        name_row.set_activates_default(true);
+        let key_row = adw::ComboRow::builder().title("Key").model(&gtk::StringList::new(&labels)).build();
+        key_row.set_selected(keys.iter().position(|k| *k == key).unwrap_or(0) as u32);
+        let rows = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
+        rows.add_css_class("boxed-list");
+        rows.append(&name_row);
+        rows.append(&key_row);
+
+        let dialog = adw::AlertDialog::new(
+            Some("Edit Pin"),
+            Some("The name shows in the list instead of the copied content, and search finds it too."),
+        );
+        dialog.set_extra_child(Some(&rows));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("save", "_Save")]);
+        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("save"));
+        dialog.set_close_response("cancel");
+        dialog.set_focus(Some(&name_row));
+        dialog.connect_response(
+            Some("save"),
+            glib::clone!(
+                #[weak(rename_to = popup)]
+                self,
+                move |_, _| {
+                    let key = keys.get(key_row.selected() as usize).copied().flatten();
+                    if let Err(err) = popup.history.edit_pin(id, &name_row.text(), key) {
+                        eprintln!("laccy: cannot update item: {err}");
+                    }
+                    popup.reload();
+                }
+            ),
+        );
+        dialog.connect_closed(glib::clone!(
+            #[weak(rename_to = popup)]
+            self,
+            move |_| popup.dialog_open.set(false)
+        ));
+        self.dialog_open.set(true);
+        dialog.present(Some(&self.window));
     }
 
     fn toggle_pin(&self) {
@@ -834,6 +903,8 @@ struct Preview {
     /// Pressed in while the item is pinned, as GNOME has no unpin icon.
     pin: gtk::ToggleButton,
     delete: gtk::Button,
+    /// Opens [`Popup::edit_pin`]; shown for pinned items only.
+    edit: gtk::Button,
 }
 
 impl Preview {
@@ -908,12 +979,19 @@ impl Preview {
             .focus_on_click(false)
             .build();
         delete.add_css_class("flat");
+        let edit = gtk::Button::builder()
+            .icon_name("document-edit-symbolic")
+            .tooltip_text("Edit Pin (Alt+E)")
+            .focus_on_click(false)
+            .build();
+        edit.add_css_class("flat");
         let toolbar = gtk::Box::builder()
             .spacing(6)
             .halign(gtk::Align::End)
             .margin_bottom(6)
             .margin_end(6)
             .build();
+        toolbar.append(&edit);
         toolbar.append(&pin);
         toolbar.append(&delete);
 
@@ -947,6 +1025,7 @@ impl Preview {
             toolbar,
             pin,
             delete,
+            edit,
         }
     }
 
@@ -1001,6 +1080,7 @@ impl Preview {
         self.pin.set_tooltip_text(Some(if pinned { "Unpin (Alt+P)" } else { "Pin (Alt+P)" }));
         self.pin.set_sensitive(item.is_some());
         self.delete.set_sensitive(item.is_some());
+        self.edit.set_visible(pinned);
     }
 }
 
@@ -1037,13 +1117,16 @@ fn format_time(millis: i64) -> String {
 
 /// What the search looks through: the text itself, or the paths of copied
 /// files. Images have nothing to search, so they only show without a query.
+/// What search matches for `item`: its name, if it has one, and its content.
 fn haystack(item: &Item, mode: search::Mode) -> String {
-    match item.kind {
-        Kind::Text => search::normalize(&item.excerpt, mode),
-        Kind::Files => {
-            search::normalize(&item.excerpt.lines().map(files::display_path).collect::<Vec<_>>().join("\n"), mode)
-        }
+    let content = match item.kind {
+        Kind::Text => item.excerpt.clone(),
+        Kind::Files => item.excerpt.lines().map(files::display_path).collect::<Vec<_>>().join("\n"),
         Kind::Image => String::new(),
+    };
+    match &item.name {
+        Some(name) => search::normalize(&format!("{name}\n{content}"), mode),
+        None => search::normalize(&content, mode),
     }
 }
 
@@ -1340,7 +1423,7 @@ fn row_factory(state: Rc<RowState>) -> gtk::SignalListItemFactory {
             });
         }
 
-        label.set_text(&text);
+        label.set_text(item.name.as_deref().unwrap_or(&text));
         state.highlight(&label);
         shortcut.set_text(&state.shortcut(list_item.position(), &item));
     });

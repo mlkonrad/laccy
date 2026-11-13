@@ -110,6 +110,7 @@ journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 | Ctrl+1 … Ctrl+9 | Pick the first nine unpinned items |
 | Ctrl+B, Ctrl+D, … | Pick a pinned item by the key shown on its row |
 | Alt+P | Pin or unpin (pinned items stay at the top, or the bottom if you choose) |
+| Alt+E | Edit a pinned item's name and key |
 | Alt+Delete | Delete the item |
 | Ctrl+Space | Show or hide the preview |
 | Ctrl+Shift+Delete | Clear unpinned history |
@@ -123,6 +124,11 @@ B D E F G H I J K L M N O P R S T U W, in that order. Unpinning frees the key
 for the next pin. The letters the search field uses with Ctrl (A, C, V, X, Y,
 Z) and Q (quit) aren't used. Past 19 pinned items, new pins get no key.
 
+**Edit Pin** (Alt+E, or the pencil in the preview) gives a pinned item a
+name, shown in the list instead of its content, and changes its key to any
+free one, or to none. Search finds the item by its name or its content.
+Unpinning removes the name.
+
 Like Maccy's menu, the bottom of the popup has **Clear**, **Preferences…**,
 **About** and **Quit**. Click one, or press Tab until it's focused, then ↑ / ↓
 and Enter. Quit doesn't stop recording, which the extension and `laccyd` do;
@@ -131,8 +137,8 @@ use **Pause Recording** for that.
 While you search, the matching text is highlighted. The **preview** shows
 the selected item in full next to the list: the whole text, the image at
 full size, or the paths of copied files, with the app it came from, when it
-was first and last copied, and how often. Its pin and trash buttons pin
-(or unpin) and delete the item, like Alt+P and Alt+Delete. It opens with
+was first and last copied, and how often. Its buttons edit a pinned item,
+pin or unpin, and delete, like Alt+E, Alt+P and Alt+Delete. It opens with
 Ctrl+Space, or by itself once the selection rests for 1.5 seconds; after
 you close it, it waits for Ctrl+Space until the popup opens again. The
 popup widens to the right while it's open.
