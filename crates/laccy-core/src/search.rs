@@ -8,7 +8,7 @@
 //!   and matches at the start of words come first, and history order breaks ties.
 //! - [`Mode::Regex`]: the whole query is one regular expression (GLib's, which is
 //!   PCRE2), where `^` and `$` also match at line breaks. History order is kept.
-//! - [`Mode::Mixed`]: as in Maccy, exact, then regex, then fuzzy, keeping the
+//! - [`Mode::Mixed`]: exact, then regex, then fuzzy, keeping the
 //!   results of the first that finds anything. An invalid pattern finds nothing.
 
 use std::cmp::Reverse;

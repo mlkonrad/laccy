@@ -216,7 +216,7 @@ impl Config {
     }
 
     /// Whether any ignored pattern matches somewhere in `text`. Invalid patterns
-    /// match nothing, as in Maccy.
+    /// match nothing.
     fn matches_ignored_pattern(&self, text: &str) -> bool {
         use glib::IntoGStr;
 
@@ -251,7 +251,7 @@ pub fn pattern_error(pattern: &str) -> Option<String> {
     compile_pattern(pattern).err().map(|err| err.message().to_owned())
 }
 
-/// Case-sensitive like Maccy's patterns; `(?i)` turns that off.
+/// Case-sensitive; `(?i)` turns that off.
 fn compile_pattern(pattern: &str) -> Result<Option<glib::Regex>, glib::Error> {
     glib::Regex::new(pattern, glib::RegexCompileFlags::DEFAULT, glib::RegexMatchFlags::DEFAULT)
 }

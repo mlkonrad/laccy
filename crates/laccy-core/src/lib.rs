@@ -82,9 +82,8 @@ fn login_marker_path() -> Option<PathBuf> {
 
 /// Run when `laccyd` or the popup starts. The first of them in a login marks
 /// it, and with `clear_on_logout` removes the unpinned items left from the
-/// last login, like Maccy's "Clear history on quit". Laccy can't do it at
-/// logout itself: nothing of it reliably runs then, and laccyd is also stopped
-/// when it's reinstalled. Returns whether it cleared.
+/// last login. Laccy can't do it at logout itself: nothing of it reliably
+/// runs then, and laccyd is also stopped when it's reinstalled. Returns whether it cleared.
 pub fn clear_if_new_login(history: &history::History, clear_on_logout: bool) -> bool {
     let Some(marker) = login_marker_path() else {
         return false;
@@ -130,7 +129,7 @@ pub(crate) fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
 
 /// A single line of `text` for a popup row, cut to `max_chars` characters.
 /// Without `special_symbols` it's the [`preview`]. With them, whitespace shows
-/// like in Maccy: leading and trailing spaces as a middle dot (U+00B7), line
+/// as symbols: leading and trailing spaces as a middle dot (U+00B7), line
 /// breaks as a return symbol (U+23CE) and tabs as a tab arrow (U+21E5).
 pub fn display_text(text: &str, max_chars: usize, special_symbols: bool) -> String {
     if !special_symbols {
@@ -156,8 +155,8 @@ pub fn display_text(text: &str, max_chars: usize, special_symbols: bool) -> Stri
 }
 
 /// The color of an item that is only a hex color code, like `#3584e4`, as red,
-/// green, blue and alpha. Takes `#` and 3, 4, 6 or 8 hex digits. Unlike Maccy,
-/// the `#` is required, so words like "decade" don't count.
+/// green, blue and alpha. Takes `#` and 3, 4, 6 or 8 hex digits. The `#`
+/// is required, so words like "decade" don't count.
 pub fn hex_color(text: &str) -> Option<[u8; 4]> {
     let digits = text.trim().strip_prefix('#')?;
     if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -173,7 +172,7 @@ pub fn hex_color(text: &str) -> Option<[u8; 4]> {
     Some([channels[0], channels[1], channels[2], channels.get(3).copied().unwrap_or(255)])
 }
 
-/// Characters of the latest copy shown next to the top bar icon, like Maccy's.
+/// Characters of the latest copy shown next to the top bar icon.
 pub const LATEST_COPY_CHARS: usize = 20;
 
 /// The label of `item` next to the top bar icon: the start of its text, the

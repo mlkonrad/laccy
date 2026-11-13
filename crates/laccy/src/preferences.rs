@@ -416,7 +416,7 @@ fn about_page() -> adw::PreferencesPage {
     name.add_css_class("title-1");
     header.append(&name);
     let tagline = gtk::Label::builder()
-        .label("A lightweight clipboard manager for GNOME, inspired by Maccy")
+        .label("A lightweight clipboard manager for GNOME")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();

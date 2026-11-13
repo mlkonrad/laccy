@@ -1,6 +1,6 @@
 [package]
 name = "laccy"
-description = "Clipboard history popup for GNOME, inspired by Maccy"
+description = "Clipboard history popup for GNOME"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

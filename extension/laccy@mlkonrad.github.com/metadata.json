@@ -1,8 +1,12 @@
 {
   "uuid": "laccy@mlkonrad.github.com",
   "name": "Laccy",
-  "description": "Clipboard history in the spirit of Maccy.\n\nThis extension reads the clipboard: it records what you copy (text, images and files) in a local history that never leaves your computer, and puts items you pick back on the clipboard. Copies that password managers mark as secret are never recorded.\n\nRequires the Laccy app, which stores the history and shows the popup: https://github.com/mlkonrad/laccy#build-and-install\n\nClick the clipboard icon in the top bar to open your history, or set a shortcut in Preferences.",
-  "shell-version": ["50", "51"],
+  "description": "Clipboard history inspired by Maccy. Laccy is an independent project, not affiliated with Maccy.\n\nThis extension reads the clipboard: it records what you copy (text, images and files) in a local history that never leaves your computer, and puts items you pick back on the clipboard. Copies that password managers mark as secret are never recorded.\n\nRequires the Laccy app, which stores the history and shows the popup: https://github.com/mlkonrad/laccy#build-and-install\n\nClick the clipboard icon in the top bar to open your history, or set a shortcut in Preferences.",
+  "shell-version": [
+    "50",
+    "51"
+  ],
+  "url": "https://github.com/mlkonrad/laccy",
   "settings-schema": "org.gnome.shell.extensions.laccy",
   "version-name": "0.1.0"
 }

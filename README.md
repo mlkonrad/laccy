@@ -172,7 +172,7 @@ dconf reset -f /org/gnome/shell/extensions/laccy/
 | Esc | Close |
 | Ctrl+Q | Quit (also stops offering formatted text picked earlier) |
 
-Each pinned item gets its own key, like in Maccy: the first free one of
+Each pinned item gets its own key: the first free one of
 B D E F G H I J K L M N O P R S T U W, in that order. Unpinning frees the key
 for the next pin. The letters the search field uses with Ctrl (A, C, V, X, Y,
 Z) and Q (quit) aren't used. Past 19 pinned items, new pins get no key.
@@ -180,12 +180,12 @@ Z) and Q (quit) aren't used. Past 19 pinned items, new pins get no key.
 **Edit Pin** (Alt+E, or the pencil in the preview) gives a pinned item a
 name, shown in the list instead of its content, and changes its key to any
 free one, or to none. Search finds the item by its name or its content.
-Unpinning removes the name. For text, it also edits the content. Like in
-Maccy, changing the text removes its formatting (bold, links and the like),
+Unpinning removes the name. For text, it also edits the content.
+Changing the text removes its formatting (bold, links and the like),
 since the formatted version would no longer match; the dialog warns once
 you change it. Images and files can't be edited.
 
-Like Maccy's menu, the bottom of the popup has **Clear**, **Preferences…**,
+The bottom of the popup has **Clear**, **Preferences…**,
 **About** and **Quit**. Click one, or press Tab until it's focused, then ↑ / ↓
 and Enter. Quit doesn't stop recording, which the extension and `laccyd` do;
 use **Pause Recording** for that.
@@ -220,7 +220,7 @@ General, Appearance, History and About.
 General:
 
 - **Open Laccy:** the shortcut. Click it and press the new key combination, or Backspace to remove it. None is set by default, because extensions.gnome.org doesn't let clipboard extensions come with one.
-- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything, like Maccy (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
+- **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Paste Automatically:** also paste after picking an item (off by default).
 - **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).
 
@@ -253,7 +253,7 @@ History, Privacy:
 - **Pause Recording:** copies aren't recorded until you turn it off (off by default).
 - **Ignored Apps:** apps whose copies are never recorded. They're listed on a page of their own; **+** adds one.
 - **Ignored Patterns:** regular expressions; text copies, and file copies by their paths, that match one are never recorded. Patterns are case-sensitive unless they start with `(?i)`, so `(?i)^sk-` skips keys starting with `sk-` or `SK-`. They're listed on a page of their own; **+** adds one.
-- **Clear History on Logout:** start each login with only your pinned items, like Maccy's "Clear history on quit" (off by default). Laccy clears when it first starts after you log in again, so it also works after a shutdown, a crash or a power cut; until then the old history stays in the history file.
+- **Clear History on Logout:** start each login with only your pinned items (off by default). Laccy clears when it first starts after you log in again, so it also works after a shutdown, a crash or a power cut; until then the old history stays in the history file.
 - **Clear the Clipboard Too:** clearing the history, from the popup or the top bar menu, also empties what's currently copied (off by default).
 
 About: the version, links to the [source code](https://github.com/mlkonrad/laccy)

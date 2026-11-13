@@ -41,7 +41,7 @@ pub struct Popup {
     stack: gtk::Stack,
     empty: adw::StatusPage,
     list: gtk::ListView,
-    /// Clear, Preferences…, About and Quit below the list, like Maccy's menu.
+    /// Clear, Preferences..., About and Quit below the list.
     footer: gtk::ListBox,
     store: gio::ListStore,
     selection: gtk::SingleSelection,
@@ -305,7 +305,7 @@ impl Popup {
             }
         ));
 
-        // Like Maccy, clicking anywhere else dismisses the popup.
+        // Clicking anywhere else dismisses the popup.
         self.window.connect_is_active_notify(glib::clone!(
             #[weak(rename_to = popup)]
             self,
@@ -375,7 +375,7 @@ impl Popup {
             gdk::Key::Return | gdk::Key::KP_Enter if mods == Mod::ALT_MASK => {
                 self.pick(self.selection.selected(), !paste, plain)
             }
-            // Like Maccy's Option+Shift+Enter: always pastes, with the other formatting choice.
+            // Always pastes, with the other formatting choice.
             gdk::Key::Return | gdk::Key::KP_Enter if mods == Mod::ALT_MASK | Mod::SHIFT_MASK => {
                 self.pick(self.selection.selected(), true, !plain)
             }
@@ -385,13 +385,11 @@ impl Popup {
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::SHIFT_MASK => {
                 self.confirm_clear(false)
             }
-            // Like Maccy's Shift+Option+Command+Delete.
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::ALT_MASK | Mod::SHIFT_MASK => {
                 self.confirm_clear(true)
             }
             gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
             gdk::Key::q | gdk::Key::Q if mods == Mod::CONTROL_MASK => self.quit(),
-            // Maccy's default preview shortcut.
             gdk::Key::space if mods == Mod::CONTROL_MASK => self.toggle_preview(),
             _ if mods == Mod::CONTROL_MASK => {
                 let Some(c) = key.to_lower().to_unicode() else {
@@ -601,7 +599,7 @@ impl Popup {
         );
     }
 
-    /// Asks for the selected pinned item's name and key, like Maccy's item editor.
+    /// Asks for the selected pinned item's name and key.
     fn edit_pin(self: &Rc<Self>) {
         let Some((id, name, key)) = self
             .item_at(self.selection.selected(), |item| item.pinned.then(|| (item.id, item.name.clone(), item.pin_key)))
@@ -640,7 +638,7 @@ impl Popup {
         dialog.add_responses(&[("cancel", "_Cancel"), ("save", "_Save")]);
 
         // Only text can be edited. Its formatting can't follow the edit, so
-        // changed text loses it, as in Maccy; the warning says so once it changes.
+        // changed text loses it; the warning says so once it changes.
         let text_view = match self.history.content(id) {
             Ok(Some(Content::Text(text))) => {
                 let has_formats = self.history.formats(id).is_ok_and(|formats| !formats.is_empty());
@@ -824,7 +822,7 @@ impl Popup {
         let dialog = adw::AboutDialog::builder()
             .application_name("Laccy")
             .application_icon("io.github.mlkonrad.Laccy")
-            .comments("A lightweight clipboard manager for GNOME, inspired by Maccy")
+            .comments("A lightweight clipboard manager for GNOME")
             .version(env!("CARGO_PKG_VERSION"))
             .website("https://github.com/mlkonrad/laccy")
             .license_type(gtk::License::MitX11)
@@ -963,8 +961,8 @@ impl Popup {
     }
 }
 
-/// The pane next to the list that shows the selected item in full, like
-/// Maccy's preview. Hidden until Ctrl+Space or the selection rests.
+/// The pane next to the list that shows the selected item in full.
+/// Hidden until Ctrl+Space or the selection rests.
 struct Preview {
     separator: gtk::Separator,
     pane: gtk::Box,
@@ -980,7 +978,7 @@ struct Preview {
     first_copied: gtk::Label,
     last_copied: gtk::Label,
     copies: gtk::Label,
-    /// Pin and Delete buttons for the item, like Maccy's preview toolbar.
+    /// Pin and Delete buttons for the item.
     toolbar: gtk::Box,
     /// Pressed in while the item is pinned, as GNOME has no unpin icon.
     pin: gtk::ToggleButton,

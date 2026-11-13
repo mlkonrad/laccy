@@ -83,7 +83,7 @@ impl SortOrder {
     }
 }
 
-/// Where pinned items are listed, like Maccy's "Pin to" setting.
+/// Where pinned items are listed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PinPosition {
     /// Above the other items.

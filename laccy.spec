@@ -34,9 +34,9 @@ BuildRequires:  /usr/bin/glib-compile-schemas
 Recommends:     gnome-shell-extension-laccy = %{version}-%{release}
 
 %description
-Laccy is a lightweight, keyboard-first clipboard manager for GNOME, inspired
-by Maccy. It records text, images and files you copy, and opens a popup to
-search your history and copy an item again.
+Laccy is a lightweight, keyboard-first clipboard manager for GNOME.
+It records text, images and files you copy, and opens a popup to search your
+history and copy an item again.
 
 This package has the popup and preferences (laccy) and the history daemon
 (laccyd). The GNOME Shell extension is in gnome-shell-extension-laccy.
