@@ -255,19 +255,18 @@ impl Popup {
         self.search.connect_search_changed(glib::clone!(
             #[weak(rename_to = popup)]
             self,
-            move |_| popup.apply_filter()
+            move |_| {
+                popup.apply_filter();
+                // The first match is usually selected at the same position as
+                // the item before it, so no selection notify comes.
+                popup.selection_changed();
+            }
         ));
 
         self.selection.connect_selected_notify(glib::clone!(
             #[weak(rename_to = popup)]
             self,
-            move |_| {
-                if popup.preview.is_open() {
-                    popup.queue_preview_update();
-                } else {
-                    popup.schedule_preview();
-                }
-            }
+            move |_| popup.selection_changed()
         ));
 
         self.list.connect_activate(glib::clone!(
@@ -903,6 +902,14 @@ impl Popup {
         } else {
             // Drops the full text or image.
             self.preview.show(&self.rows, None, None);
+        }
+    }
+
+    fn selection_changed(self: &Rc<Self>) {
+        if self.preview.is_open() {
+            self.queue_preview_update();
+        } else {
+            self.schedule_preview();
         }
     }
 
