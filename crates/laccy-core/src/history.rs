@@ -193,6 +193,9 @@ pub struct History {
     conn: Connection,
 }
 
+/// Bytes the write-ahead log file is cut back to whenever it restarts.
+const WAL_SIZE_LIMIT: i64 = 1024 * 1024;
+
 impl History {
     /// Opens the history at its default location, creating the directory if needed.
     pub fn open_default() -> std::result::Result<Self, Box<dyn std::error::Error>> {
@@ -219,6 +222,11 @@ impl History {
         // Overwrites deleted items with zeros, so cleared copies can't be read
         // back from free space in the file. Per connection too.
         conn.pragma_update(None, "secure_delete", true)?;
+        // A checkpoint rewinds the write-ahead log but never shrinks the file,
+        // so one large write (an image, the VACUUM below) would leave it that
+        // big for as long as the daemon runs. This truncates it back to 1 MiB
+        // when the log restarts. Per connection too.
+        conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         // Read inside the transaction, so the daemon and the popup can't both migrate.
         let version: i32 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -245,7 +253,8 @@ impl History {
             // run in a transaction, so if another process is busy it's retried
             // on the next open; a second run by a racing process is harmless.
             match conn.execute_batch("VACUUM; PRAGMA user_version = 6;") {
-                Ok(()) => {}
+                // VACUUM copies the whole file into the log; empty it right away.
+                Ok(()) => conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?,
                 Err(err) => eprintln!("laccy: cannot compact the history yet: {err}"),
             }
         }
@@ -822,9 +831,29 @@ mod tests {
             conn.execute("DELETE FROM items WHERE text = 'leftover-7e1b'", []).unwrap();
         }
         assert!(contains(b"leftover-7e1b"), "the old file should still hold the deleted text");
-        drop(History::open(&path).unwrap());
+        let history = History::open(&path).unwrap();
+        assert_eq!(wal_len(&path), 0, "the VACUUM's copy should leave the log");
+        drop(history);
         assert!(!contains(b"leftover-7e1b"));
         assert_eq!(texts(&History::open(&path).unwrap()), ["kept"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn wal_len(path: &std::path::Path) -> u64 {
+        std::fs::metadata(path.with_extension("db-wal")).map_or(0, |m| m.len())
+    }
+
+    #[test]
+    fn write_ahead_log_shrinks_after_a_large_write() {
+        let (dir, path) = temp_db("wal-limit");
+        let mut history = History::open(&path).unwrap();
+        // Over SQLite's 1000-page auto-checkpoint, so this commit checkpoints.
+        history.add(&text(&"x".repeat(6 * 1024 * 1024)), None, 10).unwrap();
+        assert!(wal_len(&path) > WAL_SIZE_LIMIT as u64);
+        // The next write restarts the log and cuts the file back.
+        history.add(&text("small"), None, 10).unwrap();
+        assert!(wal_len(&path) <= WAL_SIZE_LIMIT as u64, "log still {} bytes", wal_len(&path));
+        drop(history);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
