@@ -69,8 +69,8 @@ pub const PICKED_MIME_TYPE: &str = "application/x-laccy-picked";
 
 /// Exported by the GNOME Shell extension from inside the gnome-shell process.
 pub const SHELL_BUS_NAME: &str = "org.gnome.Shell";
-pub const SHELL_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Shell";
-pub const SHELL_INTERFACE: &str = "io.github.mlkonrad.Laccy.Shell1";
+pub const SHELL_OBJECT_PATH: &str = "/org/gnome/Shell/Extensions/Laccy";
+pub const SHELL_INTERFACE: &str = "org.gnome.Shell.Extensions.Laccy";
 
 /// Marks that this login has started. `$XDG_RUNTIME_DIR` is emptied when the
 /// user logs out and when the computer shuts down, even without a clean

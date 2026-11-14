@@ -76,6 +76,7 @@ install -Dm644 data/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg \
 # The schema goes to the system schema folder, where both the extension and
 # laccy find it; Fedora's glib2 file triggers compile it.
 install -Dm644 extension/%{uuid}/extension.js %{buildroot}%{_datadir}/gnome-shell/extensions/%{uuid}/extension.js
+install -Dm644 -t %{buildroot}%{_datadir}/gnome-shell/extensions/%{uuid}/lib extension/%{uuid}/lib/*.js
 install -Dm644 extension/%{uuid}/metadata.json %{buildroot}%{_datadir}/gnome-shell/extensions/%{uuid}/metadata.json
 install -Dm644 extension/%{uuid}/schemas/org.gnome.shell.extensions.laccy.gschema.xml \
     %{buildroot}%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.laccy.gschema.xml
