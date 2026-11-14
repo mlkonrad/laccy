@@ -78,7 +78,7 @@ class LaccyIndicator extends PanelMenu.Button {
         this.setIgnoreNext(false);
     }
 
-    _onDestroy() {
+    destroy() {
         this._settings.disconnectObject(this);
         if (this._historyChangedId) {
             Gio.DBus.session.signal_unsubscribe(this._historyChangedId);
@@ -87,7 +87,7 @@ class LaccyIndicator extends PanelMenu.Button {
         this._clearDialog?.disconnectObject(this);
         this._clearDialog?.destroy();
         this._clearDialog = null;
-        super._onDestroy();
+        super.destroy();
     }
 
     setIgnoreNext(pending) {
