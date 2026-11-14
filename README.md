@@ -107,7 +107,8 @@ sudo dnf install laccy
 ```
 
 `laccy` is the app; it brings in `gnome-shell-extension-laccy`, the
-extension. If you'd rather get the extension from extensions.gnome.org,
+extension. If you'd rather get the extension from
+[extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/),
 install the app alone with `sudo dnf install --setopt=install_weak_deps=False laccy`.
 
 To build from source instead (requirements on Fedora:
@@ -299,7 +300,8 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Clear all history, latest copy in the top bar
 - [x] App icon
 - [x] RPM packages in COPR
-- [ ] Flatpak packaging, extensions.gnome.org release
+- [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
+- [ ] Flatpak packaging
 
 ## Support
 
