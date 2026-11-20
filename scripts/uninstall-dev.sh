@@ -14,8 +14,9 @@ if [ -L "$ext_dir" ]; then
     rm -f "$ext_dir"
 fi
 pkill -x laccyd || true
+pkill -x laccy-wayland || true
 
-rm -f "$bin_dir/laccy" "$bin_dir/laccyd" \
+rm -f "$bin_dir/laccy" "$bin_dir/laccyd" "$bin_dir/laccy-wayland" \
     "$data_dir/applications/io.github.mlkonrad.Laccy.desktop" \
     "$data_dir/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service" \
     "$data_dir/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg"
