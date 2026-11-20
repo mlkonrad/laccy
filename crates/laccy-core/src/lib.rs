@@ -89,6 +89,9 @@ pub struct ClipboardService {
     pub interface: &'static str,
     /// What the user knows it as, for messages.
     pub name: &'static str,
+    /// Whether this is the GNOME Shell extension, which also has the top bar
+    /// icon, the shortcut and the copying apps' names that laccy-wayland lacks.
+    pub gnome_shell: bool,
 }
 
 const SHELL_SERVICE: ClipboardService = ClipboardService {
@@ -96,6 +99,7 @@ const SHELL_SERVICE: ClipboardService = ClipboardService {
     object_path: SHELL_OBJECT_PATH,
     interface: SHELL_INTERFACE,
     name: "Laccy's GNOME Shell extension",
+    gnome_shell: true,
 };
 
 const WAYLAND_SERVICE: ClipboardService = ClipboardService {
@@ -103,6 +107,7 @@ const WAYLAND_SERVICE: ClipboardService = ClipboardService {
     object_path: WAYLAND_OBJECT_PATH,
     interface: WAYLAND_INTERFACE,
     name: "laccy-wayland",
+    gnome_shell: false,
 };
 
 /// The clipboard service of this session. GNOME unless the session says it's
