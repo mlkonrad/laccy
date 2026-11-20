@@ -29,9 +29,10 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  /usr/bin/glib-compile-schemas
 
 # The extension watches the clipboard and opens the popup; without it the
-# app does nothing. Weak, so people who install the extension from
-# extensions.gnome.org can leave this copy out.
-Recommends:     gnome-shell-extension-laccy = %{version}-%{release}
+# app does nothing on GNOME. Weak, so people who install the extension from
+# extensions.gnome.org can leave this copy out, and only where GNOME Shell
+# is installed, so it doesn't pull GNOME onto Sway or Hyprland systems.
+Recommends:     (gnome-shell-extension-laccy = %{version}-%{release} if gnome-shell)
 
 %description
 Laccy is a lightweight, keyboard-first clipboard manager for GNOME.
@@ -39,7 +40,8 @@ It records text, images and files you copy, and opens a popup to search your
 history and copy an item again.
 
 This package has the popup and preferences (laccy) and the history daemon
-(laccyd). The GNOME Shell extension is in gnome-shell-extension-laccy.
+(laccyd). The GNOME Shell extension is in gnome-shell-extension-laccy; on
+Sway, Hyprland and other Wayland compositors, install laccy-wayland instead.
 
 %package -n gnome-shell-extension-laccy
 Summary:        GNOME Shell extension for the Laccy clipboard manager
@@ -52,6 +54,17 @@ The GNOME Shell part of Laccy: it watches the clipboard, adds the top bar
 icon and the shortcut, and puts items picked in the popup back on the
 clipboard.
 
+%package wayland
+Summary:        Laccy's clipboard watcher for Sway, Hyprland and other Wayland compositors
+Requires:       %{name} = %{version}-%{release}
+
+%description wayland
+Does the GNOME Shell extension's work on Wayland compositors that support
+ext-data-control-v1, such as Sway and Hyprland: it records each copy, and
+puts items picked in the popup back on the clipboard and pastes them. Start
+laccy-wayland with your session and bind a key to laccy in the compositor's
+config; see README.md.
+
 %prep
 %autosetup -n %{name}-%{version}
 
@@ -61,6 +74,7 @@ cargo build --release --locked
 %install
 install -Dm755 target/release/laccy %{buildroot}%{_bindir}/laccy
 install -Dm755 target/release/laccyd %{buildroot}%{_bindir}/laccyd
+install -Dm755 target/release/laccy-wayland %{buildroot}%{_bindir}/laccy-wayland
 
 sed "s|@BINDIR@|%{_bindir}|g" data/io.github.mlkonrad.Laccy.desktop.in \
     > io.github.mlkonrad.Laccy.desktop
@@ -93,11 +107,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mlkonrad.La
 %{_datadir}/applications/io.github.mlkonrad.Laccy.desktop
 %{_datadir}/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service
 %{_datadir}/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg
+# Here, not in the extension's package, so laccy-wayland finds it without GNOME.
+%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.laccy.gschema.xml
+
+%files wayland
+%license LICENSE
+%{_bindir}/laccy-wayland
 
 %files -n gnome-shell-extension-laccy
 %license LICENSE
 %{_datadir}/gnome-shell/extensions/%{uuid}/
-%{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.laccy.gschema.xml
 
 %changelog
 * Sat Nov 14 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.3-1

@@ -1,4 +1,5 @@
-//! laccyd records clipboard changes reported by the GNOME Shell extension.
+//! laccyd records clipboard changes reported by the GNOME Shell extension, or
+//! by laccy-wayland on other Wayland compositors.
 //! D-Bus activation starts it on the first copy. It has no UI, so it stays small.
 
 use std::cell::RefCell;
@@ -9,7 +10,9 @@ use gio::glib;
 use gio::prelude::*;
 use laccy_core::config::{self, Config};
 use laccy_core::history::{Content, Format, History};
-use laccy_core::{DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, SHELL_BUS_NAME};
+use laccy_core::{
+    DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, SHELL_BUS_NAME, WAYLAND_BINARY,
+};
 
 const INTROSPECTION: &str = r#"
 <node>
@@ -87,12 +90,19 @@ fn register(connection: &gio::DBusConnection, history: Rc<RefCell<History>>, set
     let interface = node.lookup_interface(DAEMON_INTERFACE).expect("interface is in the XML");
 
     let shell = RefCell::new(None);
+    let adapter = RefCell::new(None);
     let registration = connection
         .register_object(DAEMON_OBJECT_PATH, &interface)
         .method_call(move |connection, sender, _, _, method, params, invocation| {
-            if !is_from_shell(&connection, &shell, sender) {
-                eprintln!("laccyd: refused {method} from {}, which is not GNOME Shell", sender.unwrap_or("?"));
-                invocation.return_dbus_error("org.freedesktop.DBus.Error.AccessDenied", "Only GNOME Shell may call laccyd");
+            if !is_from_shell(&connection, &shell, sender) && !is_from_adapter(&connection, &adapter, sender) {
+                eprintln!(
+                    "laccyd: refused {method} from {}, which is neither GNOME Shell nor {WAYLAND_BINARY}",
+                    sender.unwrap_or("?")
+                );
+                invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.AccessDenied",
+                    "Only GNOME Shell or laccy-wayland may call laccyd",
+                );
                 return;
             }
             // GDBus has already checked the method and its argument types against the XML.
@@ -192,6 +202,26 @@ fn is_from_shell(connection: &gio::DBusConnection, shell: &RefCell<Option<String
         .map(|(owner,)| owner);
     let allowed = owner.as_deref() == Some(sender);
     shell.replace(owner);
+    allowed
+}
+
+/// Whether `sender` runs `laccy-wayland` from the folder of this binary, the
+/// watcher used instead of the extension outside GNOME. `adapter` caches its
+/// unique name like `shell` in [`is_from_shell`].
+fn is_from_adapter(connection: &gio::DBusConnection, adapter: &RefCell<Option<String>>, sender: Option<&str>) -> bool {
+    let Some(sender) = sender else {
+        return false;
+    };
+    if adapter.borrow().as_deref() == Some(sender) {
+        return true;
+    }
+    let Ok(binary) = std::env::current_exe().map(|exe| exe.with_file_name(WAYLAND_BINARY)) else {
+        return false;
+    };
+    let allowed = laccy_core::caller_runs(connection, sender, &binary);
+    if allowed {
+        adapter.replace(Some(sender.to_owned()));
+    }
     allowed
 }
 

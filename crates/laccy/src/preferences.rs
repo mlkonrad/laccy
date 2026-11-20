@@ -28,6 +28,13 @@ const MAIN_PAGE: &str = "main";
 const IGNORED_APPS_PAGE: &str = "ignored-apps";
 const IGNORED_PATTERNS_PAGE: &str = "ignored-patterns";
 
+/// Whether Laccy runs with its GNOME Shell extension. Settings for what only
+/// the extension does (the shortcut, the top bar icon, the copying app) are
+/// left out elsewhere, where they would do nothing.
+fn gnome_shell() -> bool {
+    laccy_core::clipboard_service().gnome_shell
+}
+
 /// Shows the preferences window, or raises it if it's already open.
 pub fn present(app: &adw::Application) {
     if let Some(window) = app.windows().into_iter().find(|window| window.widget_name() == WINDOW_NAME) {
@@ -55,10 +62,18 @@ pub fn present(app: &adw::Application) {
             );
         }
         None => {
+            let (title, description) = if gnome_shell() {
+                (
+                    "Extension Not Installed",
+                    "Laccy keeps its settings with its GNOME Shell extension. Install it with scripts/install-dev.sh.",
+                )
+            } else {
+                ("Settings Not Found", "Laccy's settings schema isn't installed. Install it with scripts/install-dev.sh.")
+            };
             let missing = adw::StatusPage::builder()
                 .icon_name("dialog-warning-symbolic")
-                .title("Extension Not Installed")
-                .description("Laccy keeps its settings with its GNOME Shell extension. Install it with scripts/install-dev.sh.")
+                .title(title)
+                .description(description)
                 .build();
             stack.add_titled_with_icon(&missing, Some("general"), "General", "preferences-system-symbolic");
         }
@@ -76,7 +91,9 @@ pub fn present(app: &adw::Application) {
     // The first page added is the one shown; subpages wait to be pushed.
     navigation.add(&adw::NavigationPage::builder().title("Preferences").tag(MAIN_PAGE).child(&toolbar).build());
     if let Some(settings) = &settings {
-        navigation.add(&subpage(IGNORED_APPS_PAGE, "Ignored Apps", ignored_apps_group(settings)));
+        if gnome_shell() {
+            navigation.add(&subpage(IGNORED_APPS_PAGE, "Ignored Apps", ignored_apps_group(settings)));
+        }
         navigation.add(&subpage(IGNORED_PATTERNS_PAGE, "Ignored Patterns", ignored_patterns_group(settings)));
     }
 
@@ -163,36 +180,46 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
 
     let group = adw::PreferencesGroup::new();
 
-    let shortcut_label = gtk::ShortcutLabel::builder()
-        .disabled_text("Not Set")
-        .valign(gtk::Align::Center)
-        .build();
-    let show_shortcut = |settings: &gio::Settings, label: &gtk::ShortcutLabel| {
-        let accelerators = settings.strv(TOGGLE_SHORTCUT_KEY);
-        label.set_accelerator(accelerators.first().map_or("", |accelerator| accelerator.as_str()));
-    };
-    show_shortcut(settings, &shortcut_label);
-    settings.connect_changed(
-        Some(TOGGLE_SHORTCUT_KEY),
-        glib::clone!(
-            #[weak]
-            shortcut_label,
-            move |settings, _| show_shortcut(settings, &shortcut_label)
-        ),
-    );
+    // The GNOME Shell extension binds the shortcut. Elsewhere the compositor
+    // does, so the row only says where to set it.
+    if gnome_shell() {
+        let shortcut_label = gtk::ShortcutLabel::builder()
+            .disabled_text("Not Set")
+            .valign(gtk::Align::Center)
+            .build();
+        let show_shortcut = |settings: &gio::Settings, label: &gtk::ShortcutLabel| {
+            let accelerators = settings.strv(TOGGLE_SHORTCUT_KEY);
+            label.set_accelerator(accelerators.first().map_or("", |accelerator| accelerator.as_str()));
+        };
+        show_shortcut(settings, &shortcut_label);
+        settings.connect_changed(
+            Some(TOGGLE_SHORTCUT_KEY),
+            glib::clone!(
+                #[weak]
+                shortcut_label,
+                move |settings, _| show_shortcut(settings, &shortcut_label)
+            ),
+        );
 
-    let shortcut_row = adw::ActionRow::builder()
-        .title("Open Laccy")
-        .subtitle("Click to change")
-        .activatable(true)
-        .build();
-    shortcut_row.add_suffix(&shortcut_label);
-    shortcut_row.connect_activated(glib::clone!(
-        #[strong]
-        settings,
-        move |row| shortcut_dialog(&settings).present(Some(row))
-    ));
-    group.add(&shortcut_row);
+        let shortcut_row = adw::ActionRow::builder()
+            .title("Open Laccy")
+            .subtitle("Click to change")
+            .activatable(true)
+            .build();
+        shortcut_row.add_suffix(&shortcut_label);
+        shortcut_row.connect_activated(glib::clone!(
+            #[strong]
+            settings,
+            move |row| shortcut_dialog(&settings).present(Some(row))
+        ));
+        group.add(&shortcut_row);
+    } else {
+        let shortcut_row = adw::ActionRow::builder()
+            .title("Open Laccy")
+            .subtitle("Bind a key to the laccy command in your compositor's config")
+            .build();
+        group.add(&shortcut_row);
+    }
 
     let search_row = choice_row(
         settings,
@@ -265,6 +292,10 @@ fn appearance_page(settings: &gio::Settings) -> adw::PreferencesPage {
         (SHOW_COLOR_SWATCHES_KEY, "Color Swatches", "Show a square of color next to codes like #3584e4"),
         (SHOW_APP_ICONS_KEY, "App Icons", "Show which app each item was copied from"),
     ] {
+        // Only GNOME Shell knows which app copied an item.
+        if key == SHOW_APP_ICONS_KEY && !gnome_shell() {
+            continue;
+        }
         let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).build();
         settings.bind(key, &row, "active").build();
         list_group.add(&row);
@@ -285,7 +316,9 @@ fn appearance_page(settings: &gio::Settings) -> adw::PreferencesPage {
     settings.bind(SHOW_LATEST_COPY_KEY, &latest_row, "active").build();
     settings.bind(SHOW_INDICATOR_KEY, &latest_row, "sensitive").flags(gio::SettingsBindFlags::GET).build();
     top_bar_group.add(&latest_row);
-    page.add(&top_bar_group);
+    if gnome_shell() {
+        page.add(&top_bar_group);
+    }
 
     let preview_group = adw::PreferencesGroup::builder()
         .title("Preview")
@@ -357,19 +390,22 @@ fn history_page(settings: &gio::Settings, navigation: &adw::NavigationView) -> a
     page.add(&save_group);
 
     let privacy_group = adw::PreferencesGroup::builder().title("Privacy").build();
-    let pause_row = adw::SwitchRow::builder()
-        .title("Pause Recording")
-        .subtitle("Alt-click the top bar icon to switch it quickly")
-        .build();
+    let pause_row = adw::SwitchRow::builder().title("Pause Recording").build();
+    if gnome_shell() {
+        pause_row.set_subtitle("Alt-click the top bar icon to switch it quickly");
+    }
     settings.bind(PAUSED_KEY, &pause_row, "active").build();
     privacy_group.add(&pause_row);
-    privacy_group.add(&subpage_row(settings, navigation, IGNORED_APPS_KEY, IGNORED_APPS_PAGE, "Ignored Apps", |count| {
-        match count {
-            0 => "None".to_owned(),
-            1 => "1 app".to_owned(),
-            count => format!("{count} apps"),
-        }
-    }));
+    // Only GNOME Shell knows which app made a copy, so only there can apps be ignored.
+    if gnome_shell() {
+        privacy_group.add(&subpage_row(settings, navigation, IGNORED_APPS_KEY, IGNORED_APPS_PAGE, "Ignored Apps", |count| {
+            match count {
+                0 => "None".to_owned(),
+                1 => "1 app".to_owned(),
+                count => format!("{count} apps"),
+            }
+        }));
+    }
     privacy_group.add(&subpage_row(
         settings,
         navigation,

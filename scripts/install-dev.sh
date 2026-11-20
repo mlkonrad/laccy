@@ -10,6 +10,7 @@ uuid="laccy@mlkonrad.github.com"
 cargo build --release --manifest-path "$root/Cargo.toml"
 install -Dm755 "$root/target/release/laccy" "$bin_dir/laccy"
 install -Dm755 "$root/target/release/laccyd" "$bin_dir/laccyd"
+install -Dm755 "$root/target/release/laccy-wayland" "$bin_dir/laccy-wayland"
 
 mkdir -p "$data_dir/applications" "$data_dir/dbus-1/services" "$data_dir/gnome-shell/extensions"
 sed "s|@BINDIR@|$bin_dir|g" "$root/data/io.github.mlkonrad.Laccy.desktop.in" \

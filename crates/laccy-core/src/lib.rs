@@ -72,6 +72,94 @@ pub const SHELL_BUS_NAME: &str = "org.gnome.Shell";
 pub const SHELL_OBJECT_PATH: &str = "/org/gnome/Shell/Extensions/Laccy";
 pub const SHELL_INTERFACE: &str = "org.gnome.Shell.Extensions.Laccy";
 
+/// Exported by `laccy-wayland`, which does the extension's clipboard work on
+/// Wayland compositors other than GNOME, such as Sway and Hyprland.
+pub const WAYLAND_BUS_NAME: &str = "io.github.mlkonrad.Laccy.Wayland";
+pub const WAYLAND_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Wayland";
+/// Has the same methods as [`SHELL_INTERFACE`].
+pub const WAYLAND_INTERFACE: &str = "io.github.mlkonrad.Laccy.Clipboard1";
+/// The binary of `laccy-wayland`, next to `laccyd`, which records its copies.
+pub const WAYLAND_BINARY: &str = "laccy-wayland";
+
+/// Where the popup asks to set the clipboard and paste: the GNOME Shell
+/// extension, or `laccy-wayland` elsewhere.
+pub struct ClipboardService {
+    pub bus_name: &'static str,
+    pub object_path: &'static str,
+    pub interface: &'static str,
+    /// What the user knows it as, for messages.
+    pub name: &'static str,
+    /// Whether this is the GNOME Shell extension, which also has the top bar
+    /// icon, the shortcut and the copying apps' names that laccy-wayland lacks.
+    pub gnome_shell: bool,
+}
+
+const SHELL_SERVICE: ClipboardService = ClipboardService {
+    bus_name: SHELL_BUS_NAME,
+    object_path: SHELL_OBJECT_PATH,
+    interface: SHELL_INTERFACE,
+    name: "Laccy's GNOME Shell extension",
+    gnome_shell: true,
+};
+
+const WAYLAND_SERVICE: ClipboardService = ClipboardService {
+    bus_name: WAYLAND_BUS_NAME,
+    object_path: WAYLAND_OBJECT_PATH,
+    interface: WAYLAND_INTERFACE,
+    name: "laccy-wayland",
+    gnome_shell: false,
+};
+
+/// The clipboard service of this session. GNOME unless the session says it's
+/// another desktop, as Sway and Hyprland do in `XDG_CURRENT_DESKTOP`.
+pub fn clipboard_service() -> &'static ClipboardService {
+    match std::env::var("XDG_CURRENT_DESKTOP") {
+        Ok(desktops)
+            if !desktops.is_empty() && !desktops.split(':').any(|desktop| desktop == "GNOME") =>
+        {
+            &WAYLAND_SERVICE
+        }
+        _ => &SHELL_SERVICE,
+    }
+}
+
+/// Whether the D-Bus caller `sender` runs the binary file at `binary`. The
+/// file is compared by device and inode, so a copy elsewhere doesn't count.
+pub fn caller_runs(
+    connection: &gio::DBusConnection,
+    sender: &str,
+    binary: &std::path::Path,
+) -> bool {
+    use gio::prelude::*;
+    use std::os::unix::fs::MetadataExt;
+    let pid = connection
+        .call_sync(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "GetConnectionUnixProcessID",
+            Some(&(sender,).to_variant()),
+            Some(gio::glib::VariantTy::new("(u)").expect("valid type")),
+            gio::DBusCallFlags::NONE,
+            1000,
+            gio::Cancellable::NONE,
+        )
+        .ok()
+        .and_then(|reply| reply.get::<(u32,)>());
+    let Some((pid,)) = pid else {
+        return false;
+    };
+    match (
+        std::fs::metadata(format!("/proc/{pid}/exe")),
+        std::fs::metadata(binary),
+    ) {
+        (Ok(caller), Ok(expected)) => {
+            caller.dev() == expected.dev() && caller.ino() == expected.ino()
+        }
+        _ => false,
+    }
+}
+
 /// Marks that this login has started. `$XDG_RUNTIME_DIR` is emptied when the
 /// user logs out and when the computer shuts down, even without a clean
 /// shutdown, so a missing marker means a new login.

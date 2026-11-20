@@ -18,7 +18,8 @@ share any code with it.
 
 ## Status
 
-Early scaffold. It records and pastes text, images and files on GNOME 50 and 51 (Wayland).
+Early scaffold. It records and pastes text, images and files on GNOME 50 and 51 (Wayland),
+and experimentally on [Sway, Hyprland and other Wayland compositors](#sway-hyprland-and-other-wayland-compositors).
 See the [roadmap](#roadmap).
 
 ## How it works
@@ -156,6 +157,45 @@ both. To remove them too:
 rm -r ~/.local/share/laccy
 dconf reset -f /org/gnome/shell/extensions/laccy/
 ```
+
+## Sway, Hyprland and other Wayland compositors
+
+**Experimental.** Outside GNOME, `laccy-wayland` does the extension's job:
+it records copies and puts picked items back on the clipboard, then pastes
+them. It needs a compositor with `ext-data-control-v1` (for the clipboard) and
+`zwp_virtual_keyboard_v1` (for pasting), such as Sway 1.11 or later and recent
+Hyprland. Install it with `sudo dnf install laccy-wayland` (or `scripts/install-dev.sh`),
+then start it with your session, bind a key to `laccy` and make the popup float.
+
+Sway (`~/.config/sway/config`):
+
+```
+exec laccy-wayland
+bindsym $mod+Shift+v exec laccy
+for_window [app_id="io.github.mlkonrad.Laccy"] floating enable
+```
+
+Hyprland (`~/.config/hypr/hyprland.conf`; the window rule syntax changes
+between Hyprland versions, so check yours):
+
+```
+exec-once = laccy-wayland
+bind = SUPER SHIFT, V, exec, laccy
+windowrule = float, class:^(io\.github\.mlkonrad\.Laccy)$
+```
+
+Differences from GNOME:
+
+- There's no top bar icon. Open [Preferences](#preferences) with **Ctrl+,**
+  in the popup or with `laccy --preferences`; **Pause Recording** is on the
+  History tab.
+- The shortcut comes from your compositor's config, as above, so Preferences
+  has no **Open Laccy** shortcut to set and no **Top Bar** settings.
+- Wayland doesn't say which app made a copy, so there are no app icons and no
+  **ignored apps**, and Preferences leaves both out. Ignored patterns still work.
+- When the app that copied something quits, the clipboard empties (GNOME
+  keeps the text). The copy is still in Laccy's history.
+- Pasting waits a fixed 150 ms for focus to return to your window.
 
 ## Keyboard shortcuts
 
@@ -301,6 +341,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] App icon
 - [x] RPM packages in COPR
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
+- [x] Sway, Hyprland and other Wayland compositors (experimental, `laccy-wayland`)
 - [ ] Flatpak packaging
 
 ## Support
