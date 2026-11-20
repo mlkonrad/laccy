@@ -8,8 +8,8 @@ use gtk::{gdk, gio, glib, pango};
 use laccy_core::config::{Config, Highlight};
 use laccy_core::history::{Content, Format, History, Item, Kind};
 use laccy_core::{
-    DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, PICKED_MIME_TYPE, SHELL_BUS_NAME,
-    SHELL_INTERFACE, SHELL_OBJECT_PATH, THUMBNAIL_SCALE, files, search,
+    DAEMON_BUS_NAME, DAEMON_INTERFACE, DAEMON_OBJECT_PATH, HISTORY_CHANGED_SIGNAL, PICKED_MIME_TYPE,
+    THUMBNAIL_SCALE, files, search,
 };
 
 const PREVIEW_CHARS: usize = 100;
@@ -182,7 +182,10 @@ impl Popup {
             .margin_end(8)
             .build();
 
-        let banner = adw::Banner::new("Laccy's GNOME Shell extension isn't running, so picked items can't be copied");
+        let banner = adw::Banner::new(&format!(
+            "{} isn't running, so picked items can't be copied",
+            laccy_core::clipboard_service().name
+        ));
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.set_width_request(POPUP_WIDTH);
@@ -519,7 +522,7 @@ impl Popup {
         (0..self.store.n_items()).find(|&position| self.item_at(position, |item| item.pin_key) == Some(Some(key)))
     }
 
-    /// Copies the item at `position` and closes the popup. The extension sets
+    /// Copies the item at `position` and closes the popup. The extension (or laccy-wayland) sets
     /// the clipboard so it outlives this process, then pastes if asked. Text
     /// with formatting, unless `plain`, is offered by this process instead
     /// (see [`offer_formatted`]).
@@ -566,8 +569,8 @@ impl Popup {
                 Some(("SetContent", Some(set_content_parameters(&mime_type, &data, paste))))
             }
         };
-        // The extension doesn't record clipboard changes it or this process
-        // makes, so move the item to the top here.
+        // The extension and laccy-wayland don't record clipboard changes they or this process
+        // make, so move the item to the top here.
         if let Err(err) = self.history.touch(id) {
             eprintln!("laccy: cannot update item: {err}");
         }
@@ -579,10 +582,11 @@ impl Popup {
         let Some((method, parameters)) = call else {
             return;
         };
+        let service = laccy_core::clipboard_service();
         connection.call(
-            Some(SHELL_BUS_NAME),
-            SHELL_OBJECT_PATH,
-            SHELL_INTERFACE,
+            Some(service.bus_name),
+            service.object_path,
+            service.interface,
             method,
             parameters.as_ref(),
             None,
@@ -591,7 +595,7 @@ impl Popup {
             gio::Cancellable::NONE,
             move |result| {
                 if let Err(err) = result {
-                    eprintln!("laccy: the GNOME Shell extension's {method} call failed: {err}");
+                    eprintln!("laccy: {}'s {method} call failed: {err}", service.name);
                 }
                 drop(hold);
             },
@@ -786,16 +790,17 @@ impl Popup {
         dialog.present(Some(&self.window));
     }
 
-    /// Asks the extension to empty the clipboard, which only gnome-shell can
+    /// Asks the extension or laccy-wayland to empty the clipboard, which only they can
     /// do for whatever app copied last.
     fn clear_clipboard(&self) {
         let Some(connection) = self.window.application().and_then(|app| app.dbus_connection()) else {
             return;
         };
+        let service = laccy_core::clipboard_service();
         connection.call(
-            Some(SHELL_BUS_NAME),
-            SHELL_OBJECT_PATH,
-            SHELL_INTERFACE,
+            Some(service.bus_name),
+            service.object_path,
+            service.interface,
             "ClearClipboard",
             None,
             None,
@@ -804,7 +809,7 @@ impl Popup {
             gio::Cancellable::NONE,
             |result| {
                 if let Err(err) = result {
-                    eprintln!("laccy: the GNOME Shell extension's ClearClipboard call failed: {err}");
+                    eprintln!("laccy: {}'s ClearClipboard call failed: {err}", service.name);
                 }
             },
         );
@@ -850,12 +855,13 @@ impl Popup {
         let Some(connection) = self.window.application().and_then(|app| app.dbus_connection()) else {
             return;
         };
+        let service = laccy_core::clipboard_service();
         connection.call(
-            Some(SHELL_BUS_NAME),
-            SHELL_OBJECT_PATH,
+            Some(service.bus_name),
+            service.object_path,
             "org.freedesktop.DBus.Properties",
             "GetAll",
-            Some(&(SHELL_INTERFACE,).to_variant()),
+            Some(&(service.interface,).to_variant()),
             None,
             gio::DBusCallFlags::NO_AUTO_START,
             1000,
