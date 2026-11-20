@@ -186,10 +186,13 @@ windowrule = float, class:^(io\.github\.mlkonrad\.Laccy)$
 
 Differences from GNOME:
 
-- There's no top bar icon. Pause recording with
-  `gsettings set org.gnome.shell.extensions.laccy paused true`.
-- Wayland doesn't say which app made a copy, so there are no app icons and
-  **ignored apps** have no effect. Ignored patterns still work.
+- There's no top bar icon. Open [Preferences](#preferences) with **Ctrl+,**
+  in the popup or with `laccy --preferences`; **Pause Recording** is on the
+  History tab.
+- The shortcut comes from your compositor's config, as above, so Preferences
+  has no **Open Laccy** shortcut to set and no **Top Bar** settings.
+- Wayland doesn't say which app made a copy, so there are no app icons and no
+  **ignored apps**, and Preferences leaves both out. Ignored patterns still work.
 - When the app that copied something quits, the clipboard empties (GNOME
   keeps the text). The copy is still in Laccy's history.
 - Pasting waits a fixed 150 ms for focus to return to your window.
