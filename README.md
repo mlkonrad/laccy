@@ -199,6 +199,23 @@ bind = SUPER SHIFT, V, exec, laccy
 windowrule = float, class:^(io\.github\.mlkonrad\.Laccy)$
 ```
 
+To open the popup at the mouse pointer instead of the middle of the screen,
+let the compositor place it (Laccy can't place its own window on Wayland).
+Sway, on the `for_window` line:
+
+```
+for_window [app_id="io.github.mlkonrad.Laccy"] floating enable, move position mouse
+```
+
+Hyprland with a Lua config, in the window rule:
+
+```lua
+    move = "(cursor_x-(window_w*0.5)) (cursor_y-(window_h*0.5))",
+```
+
+The compositor places the popup before its preview pane opens, so near the
+edges of the screen part of it can end up off screen.
+
 Differences from GNOME:
 
 - There's no top bar icon. Open [Preferences](#preferences) with **Ctrl+,**
