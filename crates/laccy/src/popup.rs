@@ -23,6 +23,10 @@ const POPUP_HEIGHT: i32 = 540;
 const PREVIEW_WIDTH: i32 = 400;
 /// More rows than fit in the popup, listed before it first shows (see `Popup::apply_filter`).
 const INITIAL_ROWS: usize = 20;
+/// How often, and for how long at most, a paste through laccy-wayland waits
+/// for modifier keys to be released, see [`Popup::paste_after_release`].
+const RELEASE_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+const RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Opens the popup, or closes it if it's already open.
 pub fn toggle(app: &adw::Application) {
@@ -64,6 +68,9 @@ pub struct Popup {
     /// the popup without it counting as a click elsewhere.
     dialog_open: Cell<bool>,
     closing: Cell<bool>,
+    /// Set while a picked item waits for modifier keys to be released before
+    /// it's pasted; keys are ignored meanwhile.
+    waiting_to_paste: Cell<bool>,
     preview: Preview,
     /// Opens the preview once the selection rests, see [`Popup::schedule_preview`].
     preview_timeout: RefCell<Option<glib::SourceId>>,
@@ -234,6 +241,7 @@ impl Popup {
             was_active: Cell::new(false),
             dialog_open: Cell::new(false),
             closing: Cell::new(false),
+            waiting_to_paste: Cell::new(false),
             preview,
             preview_timeout: RefCell::default(),
             preview_update: RefCell::default(),
@@ -354,6 +362,9 @@ impl Popup {
     fn on_key(self: &Rc<Self>, key: gdk::Key, state: gdk::ModifierType) -> glib::Propagation {
         use gdk::ModifierType as Mod;
 
+        if self.waiting_to_paste.get() {
+            return glib::Propagation::Stop;
+        }
         if self.window.visible_dialog().is_some() {
             return glib::Propagation::Proceed;
         }
@@ -526,7 +537,7 @@ impl Popup {
     /// the clipboard so it outlives this process, then pastes if asked. Text
     /// with formatting, unless `plain`, is offered by this process instead
     /// (see [`offer_formatted`]).
-    fn pick(&self, position: u32, paste: bool, plain: bool) {
+    fn pick(self: &Rc<Self>, position: u32, paste: bool, plain: bool) {
         let Some(id) = self.item_at(position, |item| item.id) else {
             return;
         };
@@ -576,30 +587,52 @@ impl Popup {
         }
 
         // Stay alive until the extension replies, even though the window is gone.
-        let hold = app.hold();
-        // Closing first returns focus to the previous window before the paste.
-        self.close();
-        let Some((method, parameters)) = call else {
-            return;
-        };
-        let service = laccy_core::clipboard_service();
-        connection.call(
-            Some(service.bus_name),
-            service.object_path,
-            service.interface,
-            method,
-            parameters.as_ref(),
-            None,
-            gio::DBusCallFlags::NONE,
-            5000,
-            gio::Cancellable::NONE,
-            move |result| {
-                if let Err(err) = result {
-                    eprintln!("laccy: {}'s {method} call failed: {err}", service.name);
-                }
-                drop(hold);
-            },
-        );
+        let request = PickRequest { connection, call, hold: app.hold() };
+        if paste && !laccy_core::clipboard_service().gnome_shell && self.modifiers_held() {
+            self.paste_after_release(request);
+        } else {
+            // Closing first returns focus to the previous window before the paste.
+            self.close();
+            request.send();
+        }
+    }
+
+    /// Whether a modifier key, like the Alt of Alt+Enter, is held down.
+    fn modifiers_held(&self) -> bool {
+        use gdk::ModifierType as Mod;
+        let keyboard = WidgetExt::display(&self.window).default_seat().and_then(|seat| seat.keyboard());
+        keyboard.is_some_and(|keyboard| {
+            keyboard
+                .modifier_state()
+                .intersects(Mod::CONTROL_MASK | Mod::ALT_MASK | Mod::SHIFT_MASK | Mod::SUPER_MASK | Mod::META_MASK)
+        })
+    }
+
+    /// Closes the popup and sends `request` once no modifier key is held.
+    /// laccy-wayland can't see the keyboard, and the compositor would combine
+    /// its Ctrl+V with a held Alt into Ctrl+Alt+V, which apps don't paste on.
+    /// The popup still has focus, so it sees the release. The GNOME Shell
+    /// extension waits by itself.
+    fn paste_after_release(self: &Rc<Self>, request: PickRequest) {
+        self.waiting_to_paste.set(true);
+        let popup = Rc::downgrade(self);
+        let start = std::time::Instant::now();
+        let mut request = Some(request);
+        glib::timeout_add_local(RELEASE_POLL, move || {
+            let popup = popup.upgrade();
+            // Closed meanwhile, for example by a click elsewhere: paste anyway.
+            let open = popup.as_ref().is_some_and(|popup| !popup.closing.get());
+            if open && start.elapsed() < RELEASE_WAIT && popup.as_ref().is_some_and(|popup| popup.modifiers_held()) {
+                return glib::ControlFlow::Continue;
+            }
+            if let Some(popup) = popup {
+                popup.close();
+            }
+            if let Some(request) = request.take() {
+                request.send();
+            }
+            glib::ControlFlow::Break
+        });
     }
 
     /// Asks for the selected pinned item's name and key.
@@ -1253,6 +1286,42 @@ fn offer_formatted(app: &gtk::Application, display: &gdk::Display, text: &str, f
 }
 
 /// Arguments of the extension's `SetContent` method.
+/// The clipboard call for a picked item, sent once the popup may close.
+struct PickRequest {
+    connection: gio::DBusConnection,
+    /// The method and its arguments, or `None` when there's nothing to call.
+    call: Option<(&'static str, Option<glib::Variant>)>,
+    /// Keeps the app running until the call is answered.
+    hold: gio::ApplicationHoldGuard,
+}
+
+impl PickRequest {
+    fn send(self) {
+        let Some((method, parameters)) = self.call else {
+            return;
+        };
+        let hold = self.hold;
+        let service = laccy_core::clipboard_service();
+        self.connection.call(
+            Some(service.bus_name),
+            service.object_path,
+            service.interface,
+            method,
+            parameters.as_ref(),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            gio::Cancellable::NONE,
+            move |result| {
+                if let Err(err) = result {
+                    eprintln!("laccy: {}'s {method} call failed: {err}", service.name);
+                }
+                drop(hold);
+            },
+        );
+    }
+}
+
 fn set_content_parameters(mime_type: &str, data: &[u8], paste: bool) -> glib::Variant {
     glib::Variant::tuple_from_iter([
         mime_type.to_variant(),
