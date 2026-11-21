@@ -175,8 +175,23 @@ bindsym $mod+Shift+v exec laccy
 for_window [app_id="io.github.mlkonrad.Laccy"] floating enable
 ```
 
-Hyprland (`~/.config/hypr/hyprland.conf`; the window rule syntax changes
-between Hyprland versions, so check yours):
+Hyprland with a Lua config (`~/.config/hypr/hyprland.lua`, the default in
+recent versions):
+
+```lua
+hl.on("hyprland.start", function()
+    hl.exec_cmd("laccy-wayland")
+end)
+hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("laccy"))
+hl.window_rule({
+    name = "laccy-float",
+    match = { class = "^(io\\.github\\.mlkonrad\\.Laccy)$" },
+    float = true,
+})
+```
+
+Older Hyprland (`~/.config/hypr/hyprland.conf`; the window rule syntax changes
+between these versions, so check yours):
 
 ```
 exec-once = laccy-wayland
