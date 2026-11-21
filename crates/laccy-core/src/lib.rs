@@ -110,17 +110,52 @@ const WAYLAND_SERVICE: ClipboardService = ClipboardService {
     gnome_shell: false,
 };
 
-/// The clipboard service of this session. GNOME unless the session says it's
-/// another desktop, as Sway and Hyprland do in `XDG_CURRENT_DESKTOP`.
+/// The clipboard service of this session, decided once per process.
+/// `XDG_CURRENT_DESKTOP` names the desktop when a login manager started the
+/// session (GNOME, or Sway and Hyprland, which name themselves). Sway started
+/// from a console leaves it empty, so then laccy-wayland is used if it's on
+/// the session bus, and GNOME otherwise.
 pub fn clipboard_service() -> &'static ClipboardService {
-    match std::env::var("XDG_CURRENT_DESKTOP") {
-        Ok(desktops)
-            if !desktops.is_empty() && !desktops.split(':').any(|desktop| desktop == "GNOME") =>
-        {
-            &WAYLAND_SERVICE
-        }
-        _ => &SHELL_SERVICE,
+    static SERVICE: std::sync::OnceLock<&'static ClipboardService> = std::sync::OnceLock::new();
+    SERVICE.get_or_init(|| {
+        let desktops = std::env::var("XDG_CURRENT_DESKTOP").ok();
+        service_for_desktops(desktops.as_deref()).unwrap_or_else(|| {
+            if wayland_service_running() { &WAYLAND_SERVICE } else { &SHELL_SERVICE }
+        })
+    })
+}
+
+/// The service for an `XDG_CURRENT_DESKTOP` value, or `None` when it's
+/// missing or empty and so doesn't say.
+fn service_for_desktops(desktops: Option<&str>) -> Option<&'static ClipboardService> {
+    let desktops = desktops.filter(|desktops| !desktops.is_empty())?;
+    if desktops.split(':').any(|desktop| desktop == "GNOME") {
+        Some(&SHELL_SERVICE)
+    } else {
+        Some(&WAYLAND_SERVICE)
     }
+}
+
+/// Whether laccy-wayland owns its name on the session bus.
+fn wayland_service_running() -> bool {
+    use gio::prelude::*;
+    let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else {
+        return false;
+    };
+    bus.call_sync(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+        Some(&(WAYLAND_BUS_NAME,).to_variant()),
+        Some(gio::glib::VariantTy::new("(b)").expect("valid type")),
+        gio::DBusCallFlags::NONE,
+        1000,
+        gio::Cancellable::NONE,
+    )
+    .ok()
+    .and_then(|reply| reply.get::<(bool,)>())
+    .is_some_and(|(running,)| running)
 }
 
 /// Whether the D-Bus caller `sender` runs the binary file at `binary`. The
@@ -297,7 +332,19 @@ pub fn preview(text: &str, max_chars: usize) -> String {
 mod tests {
     use super::history::{Content, History, Item, Kind, PinPosition, SortOrder};
     use super::clear_if_new_login_at;
-    use super::{display_text, hex_color, latest_copy_label, preview, thumbnail_size};
+    use super::{display_text, hex_color, latest_copy_label, preview, service_for_desktops, thumbnail_size};
+
+    #[test]
+    fn desktops_pick_the_clipboard_service() {
+        let gnome_shell = |desktops| service_for_desktops(desktops).map(|service| service.gnome_shell);
+        assert_eq!(gnome_shell(Some("GNOME")), Some(true));
+        assert_eq!(gnome_shell(Some("ubuntu:GNOME")), Some(true));
+        assert_eq!(gnome_shell(Some("sway:wlroots")), Some(false));
+        assert_eq!(gnome_shell(Some("Hyprland")), Some(false));
+        // Sway started from a console: decided by what's on the session bus.
+        assert_eq!(gnome_shell(Some("")), None);
+        assert_eq!(gnome_shell(None), None);
+    }
 
     #[test]
     fn latest_copy_labels_are_short() {
