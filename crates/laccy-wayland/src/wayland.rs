@@ -31,20 +31,18 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
 /// An app that never closes its end of the pipe is given up on.
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Just the two keys needed for Ctrl+V. Compositors switch to a virtual
-/// keyboard's keymap while it types, so the user's layout doesn't matter.
+/// A standard US keymap, which the compositor expands from its own keyboard
+/// data. Compositors switch to a virtual keyboard's keymap while it types,
+/// so the user's layout doesn't matter. A keymap holding only Ctrl and V
+/// isn't enough: GTK 3 apps like Mousepad ignored its Ctrl+V.
 const KEYMAP: &str = r#"xkb_keymap {
-    xkb_keycodes "laccy" { minimum = 8; maximum = 255; <LCTL> = 37; <AB04> = 55; };
-    xkb_types "laccy" { include "complete" };
-    xkb_compatibility "laccy" { include "complete" };
-    xkb_symbols "laccy" {
-        key <LCTL> { [ Control_L ] };
-        key <AB04> { [ v, V ] };
-        modifier_map Control { <LCTL> };
-    };
+    xkb_keycodes { include "evdev+aliases(qwerty)" };
+    xkb_types { include "complete" };
+    xkb_compatibility { include "complete" };
+    xkb_symbols { include "pc+us+inet(evdev)" };
 };
 "#;
-/// Evdev codes of the keys above: the XKB keycode minus 8.
+/// Evdev codes of Left Ctrl and V: their XKB keycodes (37, 55) minus 8.
 const KEY_LEFTCTRL: u32 = 29;
 const KEY_V: u32 = 47;
 /// The Control bit in the keymap's modifier mask.
