@@ -112,6 +112,12 @@ extension. If you'd rather get the extension from
 [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/),
 install the app alone with `sudo dnf install --setopt=install_weak_deps=False laccy`.
 
+Packages don't turn extensions on, so on GNOME enable Laccy yourself: log out
+and back in (GNOME Shell only finds new extensions at login), then switch it
+on in the Extensions app or run `gnome-extensions enable laccy@mlkonrad.github.com`.
+On other compositors, see
+[Sway, Hyprland, Niri and other Wayland compositors](#sway-hyprland-niri-and-other-wayland-compositors).
+
 To build from source instead (requirements on Fedora:
 `sudo dnf install cargo rust gtk4-devel libadwaita-devel`):
 

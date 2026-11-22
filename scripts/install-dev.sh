@@ -69,8 +69,16 @@ In your compositor's config:
 Use these full paths: compositors often start programs without ~/.local/bin in PATH.
 README.md has examples for Sway, Hyprland and Niri, under
 "Sway, Hyprland, Niri and other Wayland compositors".
-To use Laccy in GNOME too, log in there and run once: gnome-extensions enable $uuid
 EOF
+    # Without GNOME running, gnome-extensions changes the setting directly,
+    # so the extension is on at the next GNOME login.
+    if command -v gnome-extensions >/dev/null; then
+        if gnome-extensions enable "$uuid" >/dev/null 2>&1; then
+            echo "The GNOME extension is enabled too, for when you log in to GNOME."
+        else
+            echo "To use Laccy in GNOME too, log in there and run once: gnome-extensions enable $uuid"
+        fi
+    fi
 elif gnome-extensions info "$uuid" >/dev/null 2>&1; then
     gnome-extensions enable "$uuid"
     echo "Laccy installed and extension enabled. Click the clipboard icon in the top bar, or set a shortcut in Preferences."
