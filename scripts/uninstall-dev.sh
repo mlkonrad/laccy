@@ -20,6 +20,12 @@ rm -f "$bin_dir/laccy" "$bin_dir/laccyd" "$bin_dir/laccy-wayland" \
     "$data_dir/applications/io.github.mlkonrad.Laccy.desktop" \
     "$data_dir/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service" \
     "$data_dir/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg"
+# Refresh the user icon cache too, or it keeps pointing at the removed icon and
+# hides the packaged one in /usr/share/icons (the About page shows no icon).
+if [ -f "$data_dir/icons/hicolor/icon-theme.cache" ]; then
+    gtk4-update-icon-cache -qtf "$data_dir/icons/hicolor" 2>/dev/null \
+        || gtk-update-icon-cache -qtf "$data_dir/icons/hicolor" 2>/dev/null || true
+fi
 
 echo "Laccy uninstalled. Your history and settings are kept. To remove them too:"
 echo "  rm -r ~/.local/share/laccy"
