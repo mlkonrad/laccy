@@ -40,8 +40,38 @@ pkill -x laccyd || true
 # An open popup is a single instance that would keep answering the shortcut with the old binary.
 pkill -x laccy || true
 busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null 2>&1 || true
+# laccyd only takes copies from the laccy-wayland file now installed, so an old one
+# still running would be refused. Restart it from this terminal's Wayland session.
+wayland_note=""
+if pkill -x laccy-wayland; then
+    setsid -f "$bin_dir/laccy-wayland" </dev/null >/dev/null 2>&1
+    sleep 1
+    if pgrep -x laccy-wayland >/dev/null; then
+        wayland_note="laccy-wayland was restarted on the new binary."
+    else
+        wayland_note="laccy-wayland could not be restarted from here; log in again to start it."
+    fi
+fi
 
-if gnome-extensions info "$uuid" >/dev/null 2>&1; then
+# Outside GNOME (Sway, Hyprland, Niri...), the compositor's config does the extension's job.
+case ":${XDG_CURRENT_DESKTOP:-}:" in
+    *:GNOME:*) gnome=1 ;;
+    *) gnome="" ;;
+esac
+
+if [ -z "$gnome" ]; then
+    cat <<EOF
+Laccy installed. Outside GNOME, laccy-wayland does the extension's job.
+In your compositor's config:
+  1. Start $bin_dir/laccy-wayland with your session.
+  2. Bind a key to $bin_dir/laccy.
+  3. Make windows with the app ID io.github.mlkonrad.Laccy float.
+Use these full paths: compositors often start programs without ~/.local/bin in PATH.
+README.md has examples for Sway, Hyprland and Niri, under
+"Sway, Hyprland, Niri and other Wayland compositors".
+To use Laccy in GNOME too, log in there and run once: gnome-extensions enable $uuid
+EOF
+elif gnome-extensions info "$uuid" >/dev/null 2>&1; then
     gnome-extensions enable "$uuid"
     echo "Laccy installed and extension enabled. Click the clipboard icon in the top bar, or set a shortcut in Preferences."
 else
@@ -51,4 +81,7 @@ Laccy installed. GNOME Shell only discovers new extensions at login, so:
   2. Run: gnome-extensions enable $uuid
   3. Click the clipboard icon in the top bar, or set a shortcut in Preferences.
 EOF
+fi
+if [ -n "$wayland_note" ]; then
+    echo "$wayland_note"
 fi
