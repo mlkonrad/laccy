@@ -31,7 +31,7 @@ BuildRequires:  /usr/bin/glib-compile-schemas
 # The extension watches the clipboard and opens the popup; without it the
 # app does nothing on GNOME. Weak, so people who install the extension from
 # extensions.gnome.org can leave this copy out, and only where GNOME Shell
-# is installed, so it doesn't pull GNOME onto Sway or Hyprland systems.
+# is installed, so it doesn't pull GNOME onto Sway, Hyprland or Niri systems.
 Recommends:     (gnome-shell-extension-laccy = %{version}-%{release} if gnome-shell)
 
 %description
@@ -41,7 +41,7 @@ history and copy an item again.
 
 This package has the popup and preferences (laccy) and the history daemon
 (laccyd). The GNOME Shell extension is in gnome-shell-extension-laccy; on
-Sway, Hyprland and other Wayland compositors, install laccy-wayland instead.
+Sway, Hyprland, Niri and other Wayland compositors, install laccy-wayland instead.
 
 %package -n gnome-shell-extension-laccy
 Summary:        GNOME Shell extension for the Laccy clipboard manager
@@ -55,12 +55,12 @@ icon and the shortcut, and puts items picked in the popup back on the
 clipboard.
 
 %package wayland
-Summary:        Laccy's clipboard watcher for Sway, Hyprland and other Wayland compositors
+Summary:        Laccy's clipboard watcher for Sway, Hyprland, Niri and other Wayland compositors
 Requires:       %{name} = %{version}-%{release}
 
 %description wayland
 Does the GNOME Shell extension's work on Wayland compositors that support
-ext-data-control-v1, such as Sway and Hyprland: it records each copy, and
+ext-data-control-v1, such as Sway, Hyprland and Niri: it records each copy, and
 puts items picked in the popup back on the clipboard and pastes them. Start
 laccy-wayland with your session and bind a key to laccy in the compositor's
 config; see README.md.
