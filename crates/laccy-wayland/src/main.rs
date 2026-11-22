@@ -1,5 +1,5 @@
 //! laccy-wayland does the GNOME Shell extension's work on other Wayland
-//! compositors, like Sway and Hyprland: it sends each copy to laccyd, and
+//! compositors, like Sway, Hyprland and Niri: it sends each copy to laccyd, and
 //! sets the clipboard and pastes when the popup asks. Start it with the
 //! session, for example from the compositor's config.
 

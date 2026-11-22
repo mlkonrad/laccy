@@ -19,7 +19,7 @@ share any code with it.
 ## Status
 
 Early scaffold. It records and pastes text, images and files on GNOME 50 and 51 (Wayland),
-and experimentally on [Sway, Hyprland and other Wayland compositors](#sway-hyprland-and-other-wayland-compositors).
+and experimentally on [Sway, Hyprland, Niri and other Wayland compositors](#sway-hyprland-niri-and-other-wayland-compositors).
 See the [roadmap](#roadmap).
 
 ## How it works
@@ -158,13 +158,13 @@ rm -r ~/.local/share/laccy
 dconf reset -f /org/gnome/shell/extensions/laccy/
 ```
 
-## Sway, Hyprland and other Wayland compositors
+## Sway, Hyprland, Niri and other Wayland compositors
 
 **Experimental.** Outside GNOME, `laccy-wayland` does the extension's job:
 it records copies and puts picked items back on the clipboard, then pastes
 them. It needs a compositor with `ext-data-control-v1` (for the clipboard) and
-`zwp_virtual_keyboard_v1` (for pasting), such as Sway 1.11 or later and recent
-Hyprland. Install it with `sudo dnf install laccy-wayland` (or `scripts/install-dev.sh`),
+`zwp_virtual_keyboard_v1` (for pasting), such as Sway 1.11 or later, recent
+Hyprland and Niri 26.04. Install it with `sudo dnf install laccy-wayland` (or `scripts/install-dev.sh`),
 then start it with your session, bind a key to `laccy` and make the popup float.
 
 Sway (`~/.config/sway/config`):
@@ -199,8 +199,29 @@ bind = SUPER SHIFT, V, exec, laccy
 windowrule = float, class:^(io\.github\.mlkonrad\.Laccy)$
 ```
 
+Niri (`~/.config/niri/config.kdl`; its default config already uses
+`Mod+Shift+V`, so this binds `Mod+Shift+C`):
+
+```kdl
+spawn-at-startup "laccy-wayland"
+
+binds {
+    Mod+Shift+C hotkey-overlay-title="Clipboard History: laccy" { spawn "laccy"; }
+}
+
+window-rule {
+    match app-id=r#"^io\.github\.mlkonrad\.Laccy$"#
+    open-floating true
+}
+```
+
+Niri starts programs with the `PATH` of the systemd user manager, which
+usually leaves out `~/.local/bin`. After `scripts/install-dev.sh`, write
+the full paths there, such as `"/home/you/.local/bin/laccy-wayland"`.
+
 To open the popup at the mouse pointer instead of the middle of the screen,
 let the compositor place it (Laccy can't place its own window on Wayland).
+Niri can't place windows at the pointer, so there it stays in the middle.
 Sway, on the `for_window` line:
 
 ```
@@ -373,7 +394,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] App icon
 - [x] RPM packages in COPR
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
-- [x] Sway, Hyprland and other Wayland compositors (experimental, `laccy-wayland`)
+- [x] Sway, Hyprland, Niri and other Wayland compositors (experimental, `laccy-wayland`)
 - [ ] Flatpak packaging
 
 ## Support

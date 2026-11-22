@@ -73,7 +73,7 @@ pub const SHELL_OBJECT_PATH: &str = "/org/gnome/Shell/Extensions/Laccy";
 pub const SHELL_INTERFACE: &str = "org.gnome.Shell.Extensions.Laccy";
 
 /// Exported by `laccy-wayland`, which does the extension's clipboard work on
-/// Wayland compositors other than GNOME, such as Sway and Hyprland.
+/// Wayland compositors other than GNOME, such as Sway, Hyprland and Niri.
 pub const WAYLAND_BUS_NAME: &str = "io.github.mlkonrad.Laccy.Wayland";
 pub const WAYLAND_OBJECT_PATH: &str = "/io/github/mlkonrad/Laccy/Wayland";
 /// Has the same methods as [`SHELL_INTERFACE`].
@@ -112,7 +112,7 @@ const WAYLAND_SERVICE: ClipboardService = ClipboardService {
 
 /// The clipboard service of this session, decided once per process.
 /// `XDG_CURRENT_DESKTOP` names the desktop when a login manager started the
-/// session (GNOME, or Sway and Hyprland, which name themselves). Sway started
+/// session (GNOME, or Sway, Hyprland and Niri, which name themselves). Sway started
 /// from a console leaves it empty, so then laccy-wayland is used if it's on
 /// the session bus, and GNOME otherwise.
 pub fn clipboard_service() -> &'static ClipboardService {
@@ -341,6 +341,7 @@ mod tests {
         assert_eq!(gnome_shell(Some("ubuntu:GNOME")), Some(true));
         assert_eq!(gnome_shell(Some("sway:wlroots")), Some(false));
         assert_eq!(gnome_shell(Some("Hyprland")), Some(false));
+        assert_eq!(gnome_shell(Some("niri")), Some(false));
         // Sway started from a console: decided by what's on the session bus.
         assert_eq!(gnome_shell(Some("")), None);
         assert_eq!(gnome_shell(None), None);
