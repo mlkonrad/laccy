@@ -164,8 +164,9 @@ dconf reset -f /org/gnome/shell/extensions/laccy/
 it records copies and puts picked items back on the clipboard, then pastes
 them. It needs a compositor with `ext-data-control-v1` (for the clipboard) and
 `zwp_virtual_keyboard_v1` (for pasting), such as Sway 1.11 or later, recent
-Hyprland and Niri 26.04. Install it with `sudo dnf install laccy-wayland` (or `scripts/install-dev.sh`),
-then start it with your session, bind a key to `laccy` and make the popup float.
+Hyprland and Niri 26.04. It comes with Laccy (`sudo dnf install laccy`, see
+[Build and install](#build-and-install), or `scripts/install-dev.sh`).
+Start it with your session, bind a key to `laccy` and make the popup float.
 
 Sway (`~/.config/sway/config`):
 

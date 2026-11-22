@@ -39,9 +39,12 @@ Laccy is a lightweight, keyboard-first clipboard manager for GNOME.
 It records text, images and files you copy, and opens a popup to search your
 history and copy an item again.
 
-This package has the popup and preferences (laccy) and the history daemon
-(laccyd). The GNOME Shell extension is in gnome-shell-extension-laccy; on
-Sway, Hyprland, Niri and other Wayland compositors, install laccy-wayland instead.
+This package has the popup and preferences (laccy), the history daemon
+(laccyd) and laccy-wayland. On GNOME, the GNOME Shell extension in
+gnome-shell-extension-laccy watches the clipboard. On Sway, Hyprland, Niri
+and other Wayland compositors that support ext-data-control-v1,
+laccy-wayland does that instead: start it with your session and bind a key
+to laccy in the compositor's config; see README.md.
 
 %package -n gnome-shell-extension-laccy
 Summary:        GNOME Shell extension for the Laccy clipboard manager
@@ -53,17 +56,6 @@ Requires:       %{name} = %{version}-%{release}
 The GNOME Shell part of Laccy: it watches the clipboard, adds the top bar
 icon and the shortcut, and puts items picked in the popup back on the
 clipboard.
-
-%package wayland
-Summary:        Laccy's clipboard watcher for Sway, Hyprland, Niri and other Wayland compositors
-Requires:       %{name} = %{version}-%{release}
-
-%description wayland
-Does the GNOME Shell extension's work on Wayland compositors that support
-ext-data-control-v1, such as Sway, Hyprland and Niri: it records each copy, and
-puts items picked in the popup back on the clipboard and pastes them. Start
-laccy-wayland with your session and bind a key to laccy in the compositor's
-config; see README.md.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -104,15 +96,14 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mlkonrad.La
 %doc README.md
 %{_bindir}/laccy
 %{_bindir}/laccyd
+# Small and idle unless a compositor's config starts it, so it ships here
+# rather than in a package people on other compositors would have to find.
+%{_bindir}/laccy-wayland
 %{_datadir}/applications/io.github.mlkonrad.Laccy.desktop
 %{_datadir}/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service
 %{_datadir}/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg
 # Here, not in the extension's package, so laccy-wayland finds it without GNOME.
 %{_datadir}/glib-2.0/schemas/org.gnome.shell.extensions.laccy.gschema.xml
-
-%files wayland
-%license LICENSE
-%{_bindir}/laccy-wayland
 
 %files -n gnome-shell-extension-laccy
 %license LICENSE
