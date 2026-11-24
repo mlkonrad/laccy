@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "laccy"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "gtk4",
  "laccy-core",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "laccy-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "gio",
  "rusqlite",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "laccy-wayland"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "gio",
  "glib-unix",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "laccyd"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "gio",
  "laccy-core",
