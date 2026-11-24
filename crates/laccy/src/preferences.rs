@@ -14,7 +14,7 @@ use laccy_core::config::{
     RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
     PIN_TO_KEY, SHOW_LATEST_COPY_KEY, SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
 };
-use laccy_core::history::{PinPosition, SortOrder};
+use laccy_core::history::{History, PinPosition, SortOrder};
 use laccy_core::search;
 
 const WINDOW_NAME: &str = "laccy-preferences";
@@ -350,6 +350,7 @@ fn history_page(settings: &gio::Settings, navigation: &adw::NavigationView) -> a
     size_row.set_subtitle("Pinned items come on top of this");
     settings.bind(HISTORY_SIZE_KEY, &size_row, "value").build();
     list_group.add(&size_row);
+    list_group.add(&over_size_row(settings));
 
     let sort_row = choice_row(
         settings,
@@ -434,6 +435,110 @@ fn history_page(settings: &gio::Settings, navigation: &adw::NavigationView) -> a
     page.add(&privacy_group);
 
     page
+}
+
+/// Shown while the history holds more unpinned items than History Size: the
+/// daemon doesn't delete them after History Size is lowered (see
+/// `laccy_core::history::kept_size`), so this row offers to, after asking.
+fn over_size_row(settings: &gio::Settings) -> adw::ActionRow {
+    let row = adw::ActionRow::builder().subtitle("Kept until you delete them").visible(false).build();
+    let button = gtk::Button::builder().label("_Delete").use_underline(true).valign(gtk::Align::Center).build();
+    button.add_css_class("destructive-action");
+    row.add_suffix(&button);
+
+    let history = match History::open_default() {
+        Ok(history) => std::rc::Rc::new(history),
+        Err(err) => {
+            eprintln!("laccy: cannot open history: {err}");
+            return row;
+        }
+    };
+    let over = {
+        let history = history.clone();
+        move |settings: &gio::Settings| {
+            let count = history.unpinned_count().unwrap_or_else(|err| {
+                eprintln!("laccy: cannot count history items: {err}");
+                0
+            });
+            count.saturating_sub(settings.uint(HISTORY_SIZE_KEY) as usize)
+        }
+    };
+    let update = {
+        let over = over.clone();
+        move |settings: &gio::Settings, row: &adw::ActionRow| {
+            let over = over(settings);
+            row.set_title(&match over {
+                1 => "1 item over History Size".to_owned(),
+                over => format!("{over} items over History Size"),
+            });
+            row.set_visible(over > 0);
+        }
+    };
+    update(settings, &row);
+    settings.connect_changed(
+        Some(HISTORY_SIZE_KEY),
+        glib::clone!(
+            #[weak]
+            row,
+            #[strong]
+            update,
+            move |settings, _| update(settings, &row)
+        ),
+    );
+    // Copies made while the window is open change the count too.
+    row.connect_map(glib::clone!(
+        #[weak]
+        settings,
+        #[strong]
+        update,
+        move |row| update(&settings, row)
+    ));
+    button.connect_clicked(glib::clone!(
+        #[weak]
+        settings,
+        #[weak]
+        row,
+        move |button| {
+            let over = over(&settings);
+            if over == 0 {
+                update(&settings, &row);
+                return;
+            }
+            let heading = match over {
+                1 => "Delete 1 Item?".to_owned(),
+                over => format!("Delete {over} Items?"),
+            };
+            let dialog = adw::AlertDialog::new(
+                Some(&heading),
+                Some("The oldest unpinned items will be removed, so the history fits History Size. Pinned items are kept."),
+            );
+            dialog.add_responses(&[("cancel", "_Cancel"), ("delete", "_Delete")]);
+            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+            dialog.connect_response(
+                Some("delete"),
+                glib::clone!(
+                    #[weak]
+                    settings,
+                    #[weak]
+                    row,
+                    #[strong]
+                    history,
+                    #[strong]
+                    update,
+                    move |_, _| {
+                        if let Err(err) = history.trim(settings.uint(HISTORY_SIZE_KEY) as usize) {
+                            eprintln!("laccy: cannot trim history: {err}");
+                        }
+                        update(&settings, &row);
+                    }
+                ),
+            );
+            dialog.present(Some(button));
+        }
+    ));
+    row
 }
 
 fn about_page() -> adw::PreferencesPage {

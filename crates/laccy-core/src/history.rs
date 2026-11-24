@@ -189,6 +189,14 @@ ALTER TABLE items ADD COLUMN name TEXT;
 PRAGMA user_version = 5;
 ";
 
+/// The number of unpinned items the history was last kept at, see [`kept_size`].
+const KEPT_SIZE_TABLE: &str = "
+CREATE TABLE IF NOT EXISTS kept_size (
+    id   INTEGER PRIMARY KEY CHECK (id = 1),
+    size INTEGER NOT NULL
+);
+";
+
 pub struct History {
     conn: Connection,
 }
@@ -245,6 +253,9 @@ impl History {
         if version < 5 {
             tx.execute_batch(MIGRATION_V5)?;
         }
+        // Not a numbered migration: the version 6 step below sets user_version
+        // after this transaction. Older builds ignore the table.
+        tx.execute_batch(KEPT_SIZE_TABLE)?;
         tx.commit()?;
         if version < 6 {
             // Files from before secure_delete keep deleted and replaced items in
@@ -262,7 +273,7 @@ impl History {
 
     /// Records a copy. Copying something that is already in the history moves
     /// it to the top. The oldest unpinned items beyond `history_size` are
-    /// removed.
+    /// removed, except after `history_size` was lowered: see [`kept_size`].
     pub fn add(&mut self, content: &Content, source_app: Option<&str>, history_size: usize) -> Result<i64> {
         let (kind, text, mime_type, data) = match content {
             Content::Text(text) => (Kind::Text, text.clone(), None, &[][..]),
@@ -272,6 +283,7 @@ impl History {
         let hash = content_hash(text.as_bytes()) ^ content_hash(data);
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = next_timestamp(&tx)?;
+        let unpinned_before = unpinned_count(&tx)?;
 
         let existing: Option<i64> = tx
             .query_row(
@@ -301,14 +313,28 @@ impl History {
             }
         };
 
-        tx.execute(
-            "DELETE FROM items WHERE pinned_at IS NULL AND id NOT IN (
-                 SELECT id FROM items WHERE pinned_at IS NULL ORDER BY last_copied DESC LIMIT ?1
-             )",
-            params![i64::try_from(history_size).unwrap_or(i64::MAX)],
-        )?;
+        let kept = kept_size(&tx, size_param(history_size), unpinned_before)?;
+        delete_beyond(&tx, kept)?;
         tx.commit()?;
         Ok(id)
+    }
+
+    /// Unpinned items, the ones `history_size` limits.
+    pub fn unpinned_count(&self) -> Result<usize> {
+        Ok(usize::try_from(unpinned_count(&self.conn)?).unwrap_or(0))
+    }
+
+    /// Removes the oldest unpinned items beyond `history_size`, which [`History::add`]
+    /// holds off on after `history_size` was lowered. Returns how many were removed.
+    pub fn trim(&self, history_size: usize) -> Result<usize> {
+        let size = size_param(history_size);
+        let tx = self.conn.unchecked_transaction()?;
+        let removed = delete_beyond(&tx, size)?;
+        store_kept_size(&tx, size)?;
+        tx.commit()?;
+        // As in `clear`: drop the log's copies of the removed items.
+        self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(removed)
     }
 
     /// Moves an item to the top, as if it had just been copied again.
@@ -574,6 +600,52 @@ fn free_pin_keys(conn: &Connection) -> Result<Vec<char>> {
     Ok(PIN_KEYS.chars().filter(|key| !used.contains(*key)).collect())
 }
 
+fn size_param(history_size: usize) -> i64 {
+    i64::try_from(history_size).unwrap_or(i64::MAX)
+}
+
+fn unpinned_count(conn: &Connection) -> Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM items WHERE pinned_at IS NULL", [], |row| row.get(0))
+}
+
+/// Removes the oldest unpinned items beyond the newest `size`.
+fn delete_beyond(conn: &Connection, size: i64) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM items WHERE pinned_at IS NULL AND id NOT IN (
+             SELECT id FROM items WHERE pinned_at IS NULL ORDER BY last_copied DESC LIMIT ?1
+         )",
+        params![size],
+    )
+}
+
+/// How many unpinned items a copy keeps. Normally `history_size`, but when it
+/// was lowered below the number of unpinned items, deleting the difference
+/// needs [`History::trim`], which Preferences only calls after asking: a
+/// History Size set to 1 by mistake once wiped a user's whole history on the
+/// next copy. Until then the history keeps the length it has, each copy
+/// dropping only the oldest item as in a full history, and `kept_size`
+/// remembers that length. A database from before this was stored starts
+/// from the items it holds.
+fn kept_size(tx: &Transaction, history_size: i64, unpinned_before: i64) -> Result<i64> {
+    let stored: Option<i64> = tx.query_row("SELECT size FROM kept_size", [], |row| row.get(0)).optional()?;
+    let previous = stored.unwrap_or(history_size.max(unpinned_before));
+    let kept = if history_size >= previous || unpinned_before <= history_size {
+        history_size
+    } else {
+        previous.min(unpinned_before)
+    };
+    store_kept_size(tx, kept)?;
+    Ok(kept)
+}
+
+fn store_kept_size(conn: &Connection, size: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO kept_size (id, size) VALUES (1, ?1) ON CONFLICT (id) DO UPDATE SET size = excluded.size",
+        params![size],
+    )?;
+    Ok(())
+}
+
 /// Strictly increasing, so copies within the same millisecond keep their order.
 fn next_timestamp(tx: &Transaction) -> Result<i64> {
     let latest: i64 = tx.query_row("SELECT COALESCE(MAX(last_copied), 0) FROM items", [], |row| row.get(0))?;
@@ -617,6 +689,68 @@ mod tests {
 
     fn texts(history: &History) -> Vec<String> {
         history.items(SortOrder::LastCopied, PinPosition::Top).unwrap().into_iter().map(|item| item.excerpt).collect()
+    }
+
+    #[test]
+    fn a_lowered_history_size_keeps_the_items_until_trimmed() {
+        let mut history = History::open_in_memory().unwrap();
+        for i in 0..5 {
+            history.add(&text(&i.to_string()), None, 10).unwrap();
+        }
+        // Like a full history: the new copy only pushes out the oldest one.
+        history.add(&text("5"), None, 1).unwrap();
+        assert_eq!(texts(&history), ["5", "4", "3", "2", "1"]);
+        history.add(&text("6"), None, 1).unwrap();
+        assert_eq!(texts(&history), ["6", "5", "4", "3", "2"]);
+
+        assert_eq!(history.trim(2).unwrap(), 3);
+        assert_eq!(texts(&history), ["6", "5"]);
+        // Trimmed, the new size applies.
+        history.add(&text("7"), None, 2).unwrap();
+        assert_eq!(texts(&history), ["7", "6"]);
+        // Raising it lets the history grow again.
+        history.add(&text("8"), None, 3).unwrap();
+        history.add(&text("9"), None, 3).unwrap();
+        assert_eq!(texts(&history), ["9", "8", "7"]);
+    }
+
+    #[test]
+    fn a_lowered_history_size_applies_once_the_items_fit() {
+        let mut history = History::open_in_memory().unwrap();
+        let a = history.add(&text("a"), None, 3).unwrap();
+        history.add(&text("b"), None, 3).unwrap();
+        history.add(&text("c"), None, 3).unwrap();
+        history.delete(a).unwrap();
+        // Two left fit a size of 2, so the copy trims to it as usual.
+        history.add(&text("d"), None, 2).unwrap();
+        assert_eq!(texts(&history), ["d", "c"]);
+        history.add(&text("e"), None, 2).unwrap();
+        assert_eq!(texts(&history), ["e", "d"]);
+    }
+
+    #[test]
+    fn unpinning_at_the_history_size_still_trims() {
+        let mut history = History::open_in_memory().unwrap();
+        let pinned = history.add(&text("pinned"), None, 2).unwrap();
+        history.set_pinned(pinned, true).unwrap();
+        history.add(&text("a"), None, 2).unwrap();
+        history.add(&text("b"), None, 2).unwrap();
+        history.set_pinned(pinned, false).unwrap();
+        history.add(&text("c"), None, 2).unwrap();
+        assert_eq!(texts(&history), ["c", "b"]);
+    }
+
+    #[test]
+    fn a_database_from_before_keeps_what_it_holds() {
+        let mut history = History::open_in_memory().unwrap();
+        for i in 0..4 {
+            history.add(&text(&i.to_string()), None, 10).unwrap();
+        }
+        // As if written by a build without the table.
+        history.conn.execute("DELETE FROM kept_size", []).unwrap();
+        history.add(&text("4"), None, 1).unwrap();
+        assert_eq!(texts(&history), ["4", "3", "2", "1"]);
+        assert_eq!(history.unpinned_count().unwrap(), 4);
     }
 
     #[test]

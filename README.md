@@ -390,7 +390,7 @@ Appearance, Preview:
 
 History:
 
-- **History Size:** unpinned items to keep (200 by default).
+- **History Size:** unpinned items to keep (200 by default). Lowering it below the number of items you have deletes nothing by itself: the history stops growing, and Preferences shows how many items are over the limit, with a button that asks before deleting them.
 - **Sort By:** Last Copied, First Copied or Number of Copies (Last Copied by default), for items that aren't pinned.
 - **Pinned Items Go To:** list pinned items at the Top or the Bottom, in the order you pinned them (Top by default).
 - **Save:** Text, Images and Files, the kinds of copies that are recorded (all on by default).
