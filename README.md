@@ -118,8 +118,24 @@ on in the Extensions app or run `gnome-extensions enable laccy@mlkonrad.github.c
 On other compositors, see
 [Sway, Hyprland, Niri and other Wayland compositors](#sway-hyprland-niri-and-other-wayland-compositors).
 
+On Arch Linux, install the `laccy` package from the
+[AUR](https://aur.archlinux.org/packages/laccy) with an AUR helper such as
+`yay -S laccy`, or build it with the PKGBUILD in this repository:
+
+```sh
+git clone https://github.com/mlkonrad/laccy.git
+cd laccy/packaging/arch
+makepkg -si
+```
+
+The Arch package is the app alone, meant above all for Niri, Hyprland, Sway
+and other compositors. On GNOME, also install the extension from
+[extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
+and enable it as described above.
+
 To build from source instead (requirements on Fedora:
-`sudo dnf install cargo rust gtk4-devel libadwaita-devel`):
+`sudo dnf install cargo rust gtk4-devel libadwaita-devel`; on Arch:
+`sudo pacman -S --needed base-devel cargo gtk4 libadwaita`):
 
 ```sh
 git clone https://github.com/mlkonrad/laccy.git
@@ -156,7 +172,7 @@ Laccy was installed:
 - **Settings:** GNOME's settings database (dconf), under
   `/org/gnome/shell/extensions/laccy/`.
 
-Uninstalling Laccy, with `dnf remove` or `scripts/uninstall-dev.sh`, keeps
+Uninstalling Laccy, with `dnf remove`, `pacman -R` or `scripts/uninstall-dev.sh`, keeps
 both. To remove them too:
 
 ```sh
@@ -170,7 +186,7 @@ dconf reset -f /org/gnome/shell/extensions/laccy/
 it records copies and puts picked items back on the clipboard, then pastes
 them. It needs a compositor with `ext-data-control-v1` (for the clipboard) and
 `zwp_virtual_keyboard_v1` (for pasting), such as Sway 1.11 or later, recent
-Hyprland and Niri 26.04. It comes with Laccy (`sudo dnf install laccy`, see
+Hyprland and Niri 26.04. It comes with Laccy (`sudo dnf install laccy` or the AUR package, see
 [Build and install](#build-and-install), or `scripts/install-dev.sh`).
 Start it with your session, bind a key to `laccy` and make the popup float.
 
@@ -400,6 +416,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Clear all history, latest copy in the top bar
 - [x] App icon
 - [x] RPM packages in COPR
+- [ ] Arch Linux package in the AUR
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
 - [x] Sway, Hyprland, Niri and other Wayland compositors (experimental, `laccy-wayland`)
 - [ ] Flatpak packaging
