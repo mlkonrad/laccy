@@ -9,7 +9,7 @@
 %global debug_package %{nil}
 
 Name:           laccy
-Version:        0.1.3
+Version:        0.1.4
 Release:        1%{?dist}
 Summary:        Lightweight, keyboard-first clipboard manager for GNOME
 
@@ -110,6 +110,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mlkonrad.La
 %{_datadir}/gnome-shell/extensions/%{uuid}/
 
 %changelog
+* Tue Nov 24 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.4-1
+- Add laccy-wayland for Sway, Hyprland, Niri and other Wayland compositors (experimental)
+- Ship laccy-wayland and the settings schema in the laccy package
+- Recommend the extension only where GNOME Shell is installed
+
 * Sat Nov 14 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.3-1
 - Clean up the extension's indicator in destroy() for the extensions.gnome.org review
 
