@@ -234,6 +234,7 @@ hl.window_rule({
     name = "laccy-float",
     match = { class = "^(io\\.github\\.mlkonrad\\.Laccy)$" },
     float = true,
+    stay_focused = true,
 })
 ```
 
@@ -244,7 +245,15 @@ between these versions, so check yours):
 exec-once = laccy-wayland
 bind = SUPER SHIFT, V, exec, laccy
 windowrule = float, class:^(io\.github\.mlkonrad\.Laccy)$
+windowrule = stayfocused, class:^(io\.github\.mlkonrad\.Laccy)$
 ```
+
+Hyprland gives focus to the window under the mouse pointer, and the popup
+closes when it loses focus, so without `stay_focused` it closes as soon as
+the pointer leaves it. With the rule, clicking another window no longer
+closes the popup; press Esc or the shortcut again instead. Sway follows the
+mouse too by default: if the popup closes there when the pointer leaves it,
+add `focus_follows_mouse no` to your Sway config.
 
 Niri (`~/.config/niri/config.kdl`; its default config already uses
 `Mod+Shift+V`, so this binds `Mod+Shift+C`):
