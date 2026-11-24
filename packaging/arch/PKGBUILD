@@ -1,4 +1,5 @@
-# Maintainer: Marlon Konrad <mlkonrad at users dot noreply dot github dot com>
+# Maintainer: Felipe Spychalski <felipe at fspy dot net>
+# Contributor: Marlon Konrad <mlkonrad at users dot noreply dot github dot com>
 #
 # Arch Linux package for Laccy, kept upstream at packaging/arch/PKGBUILD
 # and copied to the AUR for each release. It has the popup (laccy), the

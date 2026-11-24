@@ -449,7 +449,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Clear all history, latest copy in the top bar
 - [x] App icon
 - [x] RPM packages in COPR
-- [ ] Arch Linux package in the AUR
+- [x] Arch Linux package in the AUR
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
 - [x] Sway, Hyprland, Niri and other Wayland compositors (experimental, `laccy-wayland`)
 - [ ] Flatpak packaging
