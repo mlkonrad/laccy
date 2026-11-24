@@ -21,7 +21,7 @@ makedepends=(cargo)
 # release profile strips the binaries, so a debug package would be empty.
 options=(!lto !debug)
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('1e7a504b499c9806a85aa14cdc2f0c462d9454d07fd2bb113cbc5d3d8cf4d0c5')
 
 prepare() {
   cd "$pkgname-$pkgver"
