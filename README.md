@@ -4,10 +4,15 @@
 
 # Laccy
 
-A lightweight, keyboard-first clipboard manager for GNOME, inspired by
-[Maccy](https://github.com/p0deje/Maccy). Click the clipboard icon in the top
-bar (or press a shortcut you set in [Preferences](#preferences)), type to
-search, press **Enter** to copy, then paste wherever you like.
+A lightweight, keyboard-first clipboard manager for GNOME and for Wayland
+compositors such as Niri, Hyprland and Sway, inspired by
+[Maccy](https://github.com/p0deje/Maccy). Open it with a shortcut (or, on
+GNOME, the clipboard icon in the top bar), type to search, press **Enter** to
+copy, then paste wherever you like.
+
+**[Install](#install):** [Fedora](#fedora-44-and-45) ·
+[Arch Linux](#arch-linux) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
+[from source](#build-from-source)
 
 ![The Laccy popup with a pinned snippet, recent copies and an image in the preview, next to the preferences window](data/screenshots/hero.png)
 
@@ -15,6 +20,68 @@ search, press **Enter** to copy, then paste wherever you like.
 
 Laccy is an independent project. It is not affiliated with Maccy and doesn't
 share any code with it.
+
+<!-- The extension's missing-app notice and its extensions.gnome.org
+     description link to #build-and-install, the old name of this section. -->
+<a name="build-and-install"></a>
+
+## Install
+
+Laccy has two parts on GNOME: the **app** (the popup and the history daemon)
+and the **GNOME Shell extension**, which watches the clipboard. On Niri,
+Hyprland, Sway and other compositors, the app alone is enough: it includes
+`laccy-wayland`, which does the extension's job there.
+
+### Fedora 44 and 45
+
+```sh
+sudo dnf copr enable mlkonrad/laccy
+sudo dnf install laccy
+```
+
+This installs the app from [COPR](https://copr.fedorainfracloud.org/coprs/mlkonrad/laccy/)
+and, if GNOME is installed, the extension too. To get the extension from
+extensions.gnome.org instead, install the app alone with
+`sudo dnf install --setopt=install_weak_deps=False laccy`.
+
+### Arch Linux
+
+```sh
+yay -S laccy
+```
+
+The [AUR package](https://aur.archlinux.org/packages/laccy) is the app alone.
+Use any AUR helper, or build it yourself with the PKGBUILD in this repository:
+
+```sh
+git clone https://github.com/mlkonrad/laccy.git
+cd laccy/packaging/arch
+makepkg -si
+```
+
+On GNOME, also install the extension from
+[extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/).
+
+### Other distributions
+
+[Build from source](#build-from-source).
+
+### After installing
+
+- **GNOME:** log out and back in (GNOME Shell only finds new extensions at
+  login), then switch Laccy on in the Extensions app or run
+  `gnome-extensions enable laccy@mlkonrad.github.com`. Laccy has no shortcut
+  until you set one under **Open Laccy** in [Preferences](#preferences); until
+  then, click the clipboard icon in the top bar.
+- **Niri, Hyprland, Sway and others:** start `laccy-wayland` with your
+  session, bind a key to `laccy` and make the popup float; see
+  [Sway, Hyprland, Niri and other Wayland compositors](#sway-hyprland-niri-and-other-wayland-compositors)
+  for each compositor's config.
+
+On GNOME, the extension from extensions.gnome.org needs the app as well:
+extensions.gnome.org only hosts extensions, never programs. If the app is
+missing, the extension records nothing, and opening Laccy shows a notice that
+links here.
 
 ## Status
 
@@ -97,45 +164,10 @@ the focused app.
 - **Formatted text** (bold, links, lists or tables copied from documents, web pages and mail) keeps its HTML and RTF next to the plain text, each up to the `max-item-bytes` limit (1 MB). Picking it pastes the formatting too; **Alt+Shift+Enter** or the **Paste Without Formatting** preference picks the plain text. Apps' own formats, like LibreOffice's, aren't kept, so copies between LibreOffice documents can lose some styling.
 - GNOME Shell extensions can only put one format on the clipboard, and GNOME keeps only the plain text when an app that copied something quits. So after you pick formatted text, `laccy` keeps offering it, without a window, until something else is copied, then exits. Meanwhile it uses about 11 MB of private memory (53 MB resident, mostly shared libraries).
 
-## Build and install
+## Build from source
 
-On Fedora 44 and 45, install the packages from
-[COPR](https://copr.fedorainfracloud.org/coprs/mlkonrad/laccy/):
-
-```sh
-sudo dnf copr enable mlkonrad/laccy
-sudo dnf install laccy
-```
-
-`laccy` is the app; it brings in `gnome-shell-extension-laccy`, the
-extension. If you'd rather get the extension from
-[extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/),
-install the app alone with `sudo dnf install --setopt=install_weak_deps=False laccy`.
-
-Packages don't turn extensions on, so on GNOME enable Laccy yourself: log out
-and back in (GNOME Shell only finds new extensions at login), then switch it
-on in the Extensions app or run `gnome-extensions enable laccy@mlkonrad.github.com`.
-On other compositors, see
-[Sway, Hyprland, Niri and other Wayland compositors](#sway-hyprland-niri-and-other-wayland-compositors).
-
-On Arch Linux, install the `laccy` package from the
-[AUR](https://aur.archlinux.org/packages/laccy) with an AUR helper such as
-`yay -S laccy`, or build it with the PKGBUILD in this repository:
-
-```sh
-git clone https://github.com/mlkonrad/laccy.git
-cd laccy/packaging/arch
-makepkg -si
-```
-
-The Arch package is the app alone, meant above all for Niri, Hyprland, Sway
-and other compositors. On GNOME, also install the extension from
-[extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
-and enable it as described above.
-
-To build from source instead (requirements on Fedora:
-`sudo dnf install cargo rust gtk4-devel libadwaita-devel`; on Arch:
-`sudo pacman -S --needed base-devel cargo gtk4 libadwaita`):
+Requirements on Fedora: `sudo dnf install cargo rust gtk4-devel libadwaita-devel`;
+on Arch: `sudo pacman -S --needed base-devel cargo gtk4 libadwaita`.
 
 ```sh
 git clone https://github.com/mlkonrad/laccy.git
@@ -143,15 +175,8 @@ cd laccy
 scripts/install-dev.sh     # builds, installs into ~/.local, links the extension
 ```
 
-Either way, the first time, log out and back in (GNOME Shell only discovers new extensions
-at login), then run `gnome-extensions enable laccy@mlkonrad.github.com`.
-Laccy has no shortcut until you set one under **Open Laccy** in
-[Preferences](#preferences); until then, click the clipboard icon in the top bar.
-
-The extension and the app are installed separately: extensions.gnome.org only
-hosts the extension, never programs. If the app is missing, the extension
-records nothing, and opening Laccy shows a notice that links here.
-
+The script ends by printing what to do next on your desktop (see also
+[After installing](#after-installing)).
 `scripts/uninstall-dev.sh` removes everything except your history and settings.
 
 Development:
@@ -162,7 +187,7 @@ cargo clippy --workspace --all-targets
 journalctl --user -f -o cat /usr/bin/gnome-shell   # extension logs
 ```
 
-### Where your data lives
+## Where your data lives
 
 Each user's history and settings stay in their own home folder, whichever way
 Laccy was installed:
@@ -186,8 +211,7 @@ dconf reset -f /org/gnome/shell/extensions/laccy/
 it records copies and puts picked items back on the clipboard, then pastes
 them. It needs a compositor with `ext-data-control-v1` (for the clipboard) and
 `zwp_virtual_keyboard_v1` (for pasting), such as Sway 1.11 or later, recent
-Hyprland and Niri 26.04. It comes with Laccy (`sudo dnf install laccy` or the AUR package, see
-[Build and install](#build-and-install), or `scripts/install-dev.sh`).
+Hyprland and Niri 26.04. It comes with Laccy (see [Install](#install), or `scripts/install-dev.sh`).
 Start it with your session, bind a key to `laccy` and make the popup float.
 
 Sway (`~/.config/sway/config`):
