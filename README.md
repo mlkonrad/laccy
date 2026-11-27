@@ -11,7 +11,7 @@ GNOME, the clipboard icon in the top bar), type to search, press **Enter** to
 copy, then paste wherever you like.
 
 **[Install](#install):** [Fedora](#fedora-44-and-45) ·
-[Arch Linux](#arch-linux) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
+[Arch Linux](#arch-linux) · [Ubuntu](#ubuntu-2604) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
 [from source](#build-from-source)
 
 ![The Laccy popup with a pinned snippet, recent copies and an image in the preview, next to the preferences window](data/screenshots/hero.png)
@@ -61,6 +61,18 @@ makepkg -si
 
 On GNOME, also install the extension from
 [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/).
+
+### Ubuntu 26.04
+
+```sh
+sudo add-apt-repository ppa:mlkonrad/laccy
+sudo apt install laccy gnome-shell-extension-laccy
+```
+
+This installs the app and the extension from the
+[PPA](https://launchpad.net/~mlkonrad/+archive/ubuntu/laccy). On Sway,
+Hyprland or Niri, install `laccy` alone. To get the extension from
+extensions.gnome.org instead, also install `laccy` alone.
 
 ### Other distributions
 
@@ -457,6 +469,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] App icon
 - [x] RPM packages in COPR
 - [x] Arch Linux package in the AUR
+- [x] Ubuntu 26.04 packages in a PPA
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
 - [x] Sway, Hyprland, Niri and other Wayland compositors (experimental, `laccy-wayland`)
 - [ ] Flatpak packaging
