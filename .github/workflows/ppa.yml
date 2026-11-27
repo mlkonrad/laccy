@@ -49,7 +49,10 @@ jobs:
           fi
 
       - name: Build the source package
-        run: scripts/build-ppa-source.sh --in-ubuntu
+        run: |
+          # The checkout belongs to the runner's user, not the container's root.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          scripts/build-ppa-source.sh --in-ubuntu
 
       - name: Sign and upload
         if: github.event_name == 'release' || inputs.upload
