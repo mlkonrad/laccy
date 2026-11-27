@@ -308,8 +308,8 @@ impl Popup {
             self,
             move |_, row| match row.widget_name().as_str() {
                 "clear" => popup.confirm_clear(false),
-                "preferences" => popup.open_preferences(),
-                "about" => popup.show_about(),
+                "preferences" => popup.open_preferences(None),
+                "about" => popup.open_preferences(Some("about")),
                 "quit" => popup.quit(),
                 name => unreachable!("footer has no {name} row"),
             }
@@ -401,7 +401,7 @@ impl Popup {
             gdk::Key::Delete | gdk::Key::KP_Delete if mods == Mod::CONTROL_MASK | Mod::ALT_MASK | Mod::SHIFT_MASK => {
                 self.confirm_clear(true)
             }
-            gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(),
+            gdk::Key::comma if mods == Mod::CONTROL_MASK => self.open_preferences(None),
             gdk::Key::q | gdk::Key::Q if mods == Mod::CONTROL_MASK => self.quit(),
             gdk::Key::space if mods == Mod::CONTROL_MASK => self.toggle_preview(),
             _ if mods == Mod::CONTROL_MASK => {
@@ -848,30 +848,12 @@ impl Popup {
         );
     }
 
-    fn open_preferences(&self) {
+    /// Opens the preferences window, on the `page` tab if given.
+    fn open_preferences(&self, page: Option<&str>) {
         if let Some(app) = self.window.application().and_downcast::<adw::Application>() {
-            crate::preferences::present(&app);
+            crate::preferences::present(&app, page);
         }
         self.close();
-    }
-
-    fn show_about(self: &Rc<Self>) {
-        let dialog = adw::AboutDialog::builder()
-            .application_name("Laccy")
-            .application_icon("io.github.mlkonrad.Laccy")
-            .comments("A lightweight clipboard manager for GNOME")
-            .version(env!("CARGO_PKG_VERSION"))
-            .website("https://github.com/mlkonrad/laccy")
-            .license_type(gtk::License::MitX11)
-            .copyright("© 2026 The Laccy contributors")
-            .build();
-        dialog.connect_closed(glib::clone!(
-            #[weak(rename_to = popup)]
-            self,
-            move |_| popup.dialog_open.set(false)
-        ));
-        self.dialog_open.set(true);
-        dialog.present(Some(&self.window));
     }
 
     /// Exits laccy, which also stops offering formatted text it picked earlier.

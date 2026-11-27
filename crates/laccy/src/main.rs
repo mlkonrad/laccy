@@ -40,7 +40,7 @@ fn main() -> glib::ExitCode {
     // Every launch ends up here in the running instance, including the shortcut's.
     app.connect_command_line(|app, command_line| {
         if command_line.options_dict().contains("preferences") {
-            preferences::present(app);
+            preferences::present(app, None);
         } else {
             popup::toggle(app);
         }

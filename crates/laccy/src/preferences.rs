@@ -18,6 +18,8 @@ use laccy_core::history::{History, PinPosition, SortOrder};
 use laccy_core::search;
 
 const WINDOW_NAME: &str = "laccy-preferences";
+/// Switches the window to the tab named by its string parameter.
+const SHOW_PAGE_ACTION: &str = "win.show-page";
 
 const REPOSITORY_URL: &str = "https://github.com/mlkonrad/laccy";
 const ISSUES_URL: &str = "https://github.com/mlkonrad/laccy/issues";
@@ -35,9 +37,13 @@ fn gnome_shell() -> bool {
     laccy_core::clipboard_service().gnome_shell
 }
 
-/// Shows the preferences window, or raises it if it's already open.
-pub fn present(app: &adw::Application) {
+/// Shows the preferences window, or raises it if it's already open. With a
+/// `page` ("general", "appearance", "history" or "about") it switches to that tab.
+pub fn present(app: &adw::Application, page: Option<&str>) {
     if let Some(window) = app.windows().into_iter().find(|window| window.widget_name() == WINDOW_NAME) {
+        if let Some(page) = page {
+            WidgetExt::activate_action(&window, SHOW_PAGE_ACTION, Some(&page.to_variant())).ok();
+        }
         window.present();
         return;
     }
@@ -107,6 +113,30 @@ pub fn present(app: &adw::Application) {
         .content(&navigation)
         .build();
     window.set_widget_name(WINDOW_NAME);
+
+    let show_page = gio::ActionEntry::builder("show-page")
+        .parameter_type(Some(glib::VariantTy::STRING))
+        .activate(glib::clone!(
+            #[weak]
+            stack,
+            #[weak]
+            navigation,
+            move |_, _, page| {
+                if let Some(page) = page.and_then(|page| page.str())
+                    && stack.child_by_name(page).is_some()
+                {
+                    navigation.pop_to_tag(MAIN_PAGE);
+                    stack.set_visible_child_name(page);
+                }
+            }
+        ))
+        .build();
+    window.add_action_entries([show_page]);
+    if let Some(page) = page
+        && stack.child_by_name(page).is_some()
+    {
+        stack.set_visible_child_name(page);
+    }
 
     // Escape leaves a subpage first, and closes the window from the tabs.
     let shortcuts = gtk::ShortcutController::new();
