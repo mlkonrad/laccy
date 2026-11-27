@@ -276,7 +276,8 @@ usually leaves out `~/.local/bin`. After `scripts/install-dev.sh`, write
 the full paths there, such as `"/home/you/.local/bin/laccy-wayland"`.
 
 To open the popup at the mouse pointer instead of the middle of the screen,
-let the compositor place it (Laccy can't place its own window on Wayland).
+let the compositor place it (Laccy can't place its own window on Wayland;
+on GNOME its extension does it, see **Position** in [Preferences](#preferences)).
 Niri can't place windows at the pointer, so there it stays in the middle.
 Sway, on the `for_window` line:
 
@@ -299,7 +300,8 @@ Differences from GNOME:
   in the popup or with `laccy --preferences`; **Pause Recording** is on the
   History tab.
 - The shortcut comes from your compositor's config, as above, so Preferences
-  has no **Open Laccy** shortcut to set and no **Top Bar** settings.
+  has no **Open Laccy** shortcut to set and no **Top Bar** settings. Popup
+  placement comes from window rules, as above, so there's no **Position** setting.
 - Wayland doesn't say which app made a copy, so there are no app icons and no
   **ignored apps**, and Preferences leaves both out. Ignored patterns still work.
 - When the app that copied something quits, the clipboard empties (GNOME
@@ -343,8 +345,9 @@ you change it. Images and files can't be edited.
 
 The bottom of the popup has **Clear**, **Preferences…**,
 **About** and **Quit**. Click one, or press Tab until it's focused, then ↑ / ↓
-and Enter. Quit doesn't stop recording, which the extension and `laccyd` do;
-use **Pause Recording** for that.
+and Enter. About opens the About tab of [Preferences](#preferences). Quit
+doesn't stop recording, which the extension and `laccyd` do; use
+**Pause Recording** for that.
 
 While you search, the matching text is highlighted. The **preview** shows
 the selected item in full next to the list: the whole text, the image at
@@ -379,6 +382,10 @@ General:
 - **Search Mode:** Exact matches the words you type; Fuzzy also matches their letters in order, so `gco` finds `git checkout`; Regular Expression matches a pattern, ignoring case, so `^https?://` finds items with a line starting with a link; Mixed tries Exact, then Regular Expression, then Fuzzy, and lists the first that finds anything (Exact by default). While a pattern is invalid, the search field turns red, hovering it shows why, and the last results stay listed.
 - **Paste Automatically:** also paste after picking an item (off by default).
 - **Paste Without Formatting:** pick text as plain text, without formatting like bold or links; Alt+Shift+Enter keeps it (off by default).
+
+Appearance, Popup (GNOME only):
+
+- **Position:** where the popup opens. Automatic leaves it where GNOME puts new windows; At Mouse Pointer opens it with its top-left corner at the pointer; Screen Center centers it on the screen the pointer is on. Near a screen edge it's moved so it stays fully visible, also when the preview widens it (Automatic by default).
 
 Appearance, List:
 
