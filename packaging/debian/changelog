@@ -1,0 +1,5 @@
+laccy (0.1.6-1~ppa1) resolute; urgency=medium
+
+  * First Ubuntu package, for the Launchpad PPA.
+
+ -- Marlon Konrad <mlkonrad@users.noreply.github.com>  Fri, 27 Nov 2026 12:30:00 +0200

@@ -1,0 +1,69 @@
+#!/usr/bin/make -f
+# Debian/Ubuntu build rules for Laccy, used for the Launchpad PPA.
+#
+# Launchpad builds without network access, so the crates come from the
+# vendor/ folder, which scripts/build-ppa-source.sh ships as a second
+# source tarball (laccy_<version>.orig-vendor.tar.xz).
+
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+export CARGO_NET_OFFLINE = true
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+UUID = laccy@mlkonrad.github.com
+APP = debian/laccy
+EXT = debian/gnome-shell-extension-laccy
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	mkdir -p $(CARGO_HOME)
+	printf '[source.crates-io]\nreplace-with = "vendored"\n\n[source.vendored]\ndirectory = "%s"\n' \
+		"$(CURDIR)/vendor" > $(CARGO_HOME)/config.toml
+
+override_dh_auto_build:
+	cargo build --release --locked --offline
+
+# The thumbnail tests decode images with glycin, which runs each decoder in
+# a bwrap sandbox. Some build containers can't start one (bwrap fails to
+# mount /dev/pts), so those tests only run where it works.
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	if bwrap --unshare-all --ro-bind / / --dev /dev true 2>/dev/null; then \
+		cargo test --release --locked --offline --workspace; \
+	else \
+		echo "bwrap can't start a sandbox here; skipping the thumbnail tests"; \
+		cargo test --release --locked --offline --workspace -- --skip thumbnail::tests::; \
+	fi
+endif
+
+override_dh_auto_install:
+	install -Dm755 -t $(APP)/usr/bin \
+		target/release/laccy target/release/laccyd target/release/laccy-wayland
+	sed 's|@BINDIR@|/usr/bin|g' data/io.github.mlkonrad.Laccy.desktop.in \
+		| install -Dm644 /dev/stdin $(APP)/usr/share/applications/io.github.mlkonrad.Laccy.desktop
+	desktop-file-validate $(APP)/usr/share/applications/io.github.mlkonrad.Laccy.desktop
+	sed 's|@BINDIR@|/usr/bin|g' data/io.github.mlkonrad.Laccy.Daemon.service.in \
+		| install -Dm644 /dev/stdin $(APP)/usr/share/dbus-1/services/io.github.mlkonrad.Laccy.Daemon.service
+	install -Dm644 -t $(APP)/usr/share/icons/hicolor/scalable/apps \
+		data/icons/hicolor/scalable/apps/io.github.mlkonrad.Laccy.svg
+	# The schema ships with the app, not the extension, so laccy-wayland
+	# finds it without GNOME. GLib's dpkg trigger compiles it.
+	install -Dm644 -t $(APP)/usr/share/glib-2.0/schemas \
+		extension/$(UUID)/schemas/org.gnome.shell.extensions.laccy.gschema.xml
+	install -Dm644 -t $(EXT)/usr/share/gnome-shell/extensions/$(UUID) \
+		extension/$(UUID)/extension.js extension/$(UUID)/metadata.json
+	install -Dm644 -t $(EXT)/usr/share/gnome-shell/extensions/$(UUID)/lib \
+		extension/$(UUID)/lib/*.js
+
+# The release profile already strips the binaries, so there is no debug
+# info for dwz to compress.
+override_dh_dwz:
+
+override_dh_auto_clean:
+	rm -rf target $(CARGO_HOME)
+
+# dh_clean deletes *.orig files, but cargo checks the vendored crates'
+# Cargo.toml.orig against their .cargo-checksum.json.
+override_dh_clean:
+	dh_clean -XCargo.toml.orig

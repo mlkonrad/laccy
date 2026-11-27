@@ -1,0 +1,44 @@
+Source: laccy
+Section: utils
+Priority: optional
+Maintainer: Marlon Konrad <mlkonrad@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13),
+               cargo (>= 1.85),
+               rustc (>= 1.85),
+               gcc,
+               pkgconf,
+               libgtk-4-dev (>= 4.12),
+               libadwaita-1-dev (>= 1.5),
+               libglib2.0-bin,
+               desktop-file-utils
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/mlkonrad/laccy
+Vcs-Browser: https://github.com/mlkonrad/laccy
+Vcs-Git: https://github.com/mlkonrad/laccy.git
+
+Package: laccy
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: gnome-shell-extension-laccy
+Description: Lightweight, keyboard-first clipboard manager for GNOME
+ Laccy records text, images and files you copy, and opens a popup to search
+ your history and copy an item again.
+ .
+ This package has the popup and preferences (laccy), the history daemon
+ (laccyd) and laccy-wayland. On GNOME, also install
+ gnome-shell-extension-laccy, which watches the clipboard. On Sway, Hyprland,
+ Niri and other Wayland compositors that support ext-data-control-v1,
+ laccy-wayland does that instead: start it with your session and bind a key
+ to laccy in the compositor's config.
+
+Package: gnome-shell-extension-laccy
+Architecture: all
+Depends: ${misc:Depends},
+         gnome-shell (>= 50~),
+         laccy (>= ${source:Version}),
+         laccy (<< ${source:Version}.1~)
+Description: GNOME Shell extension for the Laccy clipboard manager
+ The GNOME Shell part of Laccy: it watches the clipboard, adds the top bar
+ icon and the shortcut, and puts items picked in the popup back on the
+ clipboard.
