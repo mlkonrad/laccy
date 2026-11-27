@@ -4,6 +4,16 @@
 
 # Laccy
 
+<p align="center">
+  <a href="LICENSE"><img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="written in Rust" src="https://img.shields.io/badge/written_in-Rust-b7410e">
+  <img alt="runs on GNOME, Niri, Hyprland and Sway" src="https://img.shields.io/badge/runs_on-GNOME_%C2%B7_Niri_%C2%B7_Hyprland_%C2%B7_Sway-4a86cf">
+  <a href="https://github.com/mlkonrad/laccy/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/mlkonrad/laccy"></a>
+  <a href="https://aur.archlinux.org/packages/laccy"><img alt="AUR version" src="https://img.shields.io/aur/version/laccy"></a>
+  <a href="https://extensions.gnome.org/extension/11759/laccy/"><img alt="GNOME extension" src="https://img.shields.io/badge/GNOME-extension-4a86cf"></a>
+  <img alt="history stays local" src="https://img.shields.io/badge/history-stays_local-2e7d32">
+</p>
+
 A lightweight, keyboard-first clipboard manager for GNOME and for Wayland
 compositors such as Niri, Hyprland and Sway, inspired by
 [Maccy](https://github.com/p0deje/Maccy). Open it with a shortcut (or, on
