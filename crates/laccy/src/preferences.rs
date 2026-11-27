@@ -9,7 +9,7 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use laccy_core::config::{
     self, CLEAR_ON_LOGOUT_KEY, CLEAR_SYSTEM_CLIPBOARD_KEY, HIGHLIGHT_MATCHES_KEY, HISTORY_SIZE_KEY, Highlight, IGNORED_APPS_KEY, IGNORED_PATTERNS_KEY,
-    PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, PREVIEW_AUTOMATICALLY_KEY, PREVIEW_DELAY_KEY,
+    PASTE_AUTOMATICALLY_KEY, PASTE_WITHOUT_FORMATTING_KEY, PAUSED_KEY, POPUP_POSITION_KEY, PREVIEW_AUTOMATICALLY_KEY, PREVIEW_DELAY_KEY,
     RECORD_FILES_KEY, RECORD_IMAGES_KEY,
     RECORD_TEXT_KEY, SEARCH_MODE_KEY, SHOW_APP_ICONS_KEY, SHOW_COLOR_SWATCHES_KEY, SHOW_INDICATOR_KEY,
     PIN_TO_KEY, SHOW_LATEST_COPY_KEY, SHOW_SPECIAL_SYMBOLS_KEY, SORT_BY_KEY, TOGGLE_SHORTCUT_KEY,
@@ -270,6 +270,23 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
 
 fn appearance_page(settings: &gio::Settings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
+
+    // Only the extension can move the popup; elsewhere the compositor's
+    // window rules do, see the README. An older installed schema may not
+    // have the key yet, and binding a missing key aborts.
+    let has_position = settings.settings_schema().is_some_and(|schema| schema.has_key(POPUP_POSITION_KEY));
+    if gnome_shell() && has_position {
+        let window_group = adw::PreferencesGroup::builder().title("Popup").build();
+        let position_row = choice_row(
+            settings,
+            POPUP_POSITION_KEY,
+            [("automatic", "Automatic"), ("pointer", "At Mouse Pointer"), ("center", "Screen Center")],
+        );
+        position_row.set_title("Position");
+        position_row.set_subtitle("Where the popup opens");
+        window_group.add(&position_row);
+        page.add(&window_group);
+    }
 
     let list_group = adw::PreferencesGroup::builder().title("List").build();
     let highlight_row = choice_row(

@@ -12,3 +12,4 @@ export const RECORD_FILES_KEY = 'record-files';
 export const MAX_ITEM_BYTES_KEY = 'max-item-bytes';
 export const MAX_IMAGE_BYTES_KEY = 'max-image-bytes';
 export const CLEAR_SYSTEM_CLIPBOARD_KEY = 'clear-system-clipboard';
+export const POPUP_POSITION_KEY = 'popup-position';

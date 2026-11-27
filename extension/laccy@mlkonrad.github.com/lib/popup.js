@@ -17,10 +17,12 @@ const CLOSE_POLL_MS = 20;
 const CLOSING_WAIT_US = 2 * GLib.USEC_PER_SEC;
 
 export class PopupLauncher {
-    // `onLaunch()` runs when the popup is started, `onClosed()` after it closed.
-    constructor(app, {onLaunch, onClosed}) {
+    // `onLaunch()` runs when the popup is started, `onShown(window)` when its
+    // window shows, `onClosed()` after it closed.
+    constructor(app, {onLaunch, onShown, onClosed}) {
         this._app = app;
         this._onLaunch = onLaunch;
+        this._onShown = onShown;
         this._onClosed = onClosed;
         this._launchTimeoutId = 0;
         this._closeWhenShown = false;
@@ -115,6 +117,7 @@ export class PopupLauncher {
                         this._closePopup(window);
                         return;
                     }
+                    this._onShown(window);
                 }
                 // Without startup notification GNOME may not focus it.
                 window.activate(global.get_current_time());

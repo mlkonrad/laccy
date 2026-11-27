@@ -15,6 +15,7 @@ import {callDaemon} from './lib/daemon.js';
 import {LaccyIndicator} from './lib/indicator.js';
 import {CLEAR_SYSTEM_CLIPBOARD_KEY, SHOW_INDICATOR_KEY, TOGGLE_SHORTCUT_KEY} from './lib/keys.js';
 import {Paster} from './lib/paster.js';
+import {PopupPlacer} from './lib/placement.js';
 import {PopupLauncher} from './lib/popup.js';
 import {ShellService} from './lib/service.js';
 
@@ -26,8 +27,10 @@ export default class LaccyExtension extends Extension {
         this._clipboard = new ClipboardWatcher(this._settings, this._app,
             pending => this._indicator?.setIgnoreNext(pending));
         this._paster = new Paster();
+        this._placer = new PopupPlacer(this._settings);
         this._popup = new PopupLauncher(this._app, {
             onLaunch: () => this._paster.allow(),
+            onShown: window => this._placer.place(window),
             // The popup may have changed the history directly.
             onClosed: () => this._indicator?.refreshLatestCopy(),
         });
@@ -54,6 +57,8 @@ export default class LaccyExtension extends Extension {
         this._service = null;
         this._popup.destroy();
         this._popup = null;
+        this._placer.destroy();
+        this._placer = null;
         this._paster.destroy();
         this._paster = null;
         this._clipboard.destroy();

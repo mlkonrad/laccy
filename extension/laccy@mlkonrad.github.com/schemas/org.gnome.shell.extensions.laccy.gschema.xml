@@ -133,6 +133,16 @@
       <summary>Preview delay</summary>
       <description>Milliseconds the selection has to rest before the preview opens automatically.</description>
     </key>
+    <key name="popup-position" type="s">
+      <choices>
+        <choice value="automatic"/>
+        <choice value="pointer"/>
+        <choice value="center"/>
+      </choices>
+      <default>'automatic'</default>
+      <summary>Popup position</summary>
+      <description>Where the popup opens on GNOME Shell: where GNOME places it, at the mouse pointer, or centered on the screen with the pointer.</description>
+    </key>
     <key name="show-indicator" type="b">
       <default>true</default>
       <summary>Show icon in top bar</summary>

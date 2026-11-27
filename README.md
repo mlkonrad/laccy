@@ -430,7 +430,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - **Terminals** paste with Ctrl+Shift+V, so auto-paste (Alt+Enter, or Paste Automatically) doesn't work there yet.
 - **Images are kept at full size** in the history database, so a long history of screenshots takes disk space.
 - **Picked formatted text** loses its formatting if `laccy` is killed before something else is copied; GNOME then keeps only the plain text.
-- The popup opens where GNOME places new windows (Wayland apps can't choose their own position), and the preview widens it to the right.
+- The popup opens where GNOME places new windows unless **Preferences → Appearance → Position** says otherwise (at the mouse pointer or in the middle of the pointer's screen; the extension moves it, since Wayland apps can't choose their own position). The preview widens it to the right, and the extension shifts it back on screen if needed.
 - **App icons** come from installed apps' desktop files, so copies from apps without one show no icon.
 - **Highlights** only mark what's visible in a row, so an item can match further along without anything highlighted; the preview shows the rest.
 
