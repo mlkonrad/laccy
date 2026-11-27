@@ -9,7 +9,7 @@
 %global debug_package %{nil}
 
 Name:           laccy
-Version:        0.1.5
+Version:        0.1.6
 Release:        1%{?dist}
 Summary:        Lightweight, keyboard-first clipboard manager for GNOME
 
@@ -110,6 +110,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mlkonrad.La
 %{_datadir}/gnome-shell/extensions/%{uuid}/
 
 %changelog
+* Fri Nov 27 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.6-1
+- Add a Popup Position setting on GNOME: automatic, at the mouse pointer or screen center
+- The popup's About row opens the About tab of Preferences
+
 * Tue Nov 24 2026 Marlon Konrad <mlkonrad@users.noreply.github.com> - 0.1.5-1
 - Don't delete the history when History Size is lowered; Preferences asks first
 
