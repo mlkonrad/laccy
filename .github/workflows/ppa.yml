@@ -1,0 +1,63 @@
+# Uploads each release to the Launchpad PPA (ppa:mlkonrad/laccy), which then
+# builds the Ubuntu 26.04 packages. It runs when a GitHub release is
+# published, like Packit's COPR builds (.packit.yaml).
+#
+# Run it by hand (Actions -> PPA -> Run workflow) to test everything but the
+# upload: it builds the source package for the version in Cargo.toml from
+# the branch you pick, whose tag must exist.
+#
+# Launchpad only takes signed uploads. PPA_SIGNING_KEY is an armored private
+# key without a passphrase, used only for this and registered on the
+# Launchpad account next to the maintainer's own key.
+name: PPA
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Sign and upload to the PPA
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ppa:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Install tools
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --no-install-recommends \
+            ca-certificates curl git cargo xz-utils dpkg-dev debhelper devscripts dput gnupg
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag matches Cargo.toml
+        if: github.event_name == 'release'
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "Release $GITHUB_REF_NAME, but Cargo.toml says $version" >&2
+            exit 1
+          fi
+
+      - name: Build the source package
+        run: scripts/build-ppa-source.sh --in-ubuntu
+
+      - name: Sign and upload
+        if: github.event_name == 'release' || inputs.upload
+        env:
+          PPA_SIGNING_KEY: ${{ secrets.PPA_SIGNING_KEY }}
+        run: |
+          printf '%s\n' "$PPA_SIGNING_KEY" | gpg --batch --import
+          fpr=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')
+          changes=$(ls target/ppa/*_source.changes)
+          debsign --re-sign -k "$fpr" "$changes"
+          dput ppa:mlkonrad/laccy "$changes"

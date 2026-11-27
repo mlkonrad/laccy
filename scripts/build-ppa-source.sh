@@ -2,15 +2,24 @@
 # Builds the Ubuntu source package for the Launchpad PPA, in an Ubuntu
 # container (podman), from the release tag v<version>.
 #
-#   scripts/build-ppa-source.sh            # version from Cargo.toml
-#   scripts/build-ppa-source.sh --test     # also build the .debs, offline
+#   scripts/build-ppa-source.sh             # version from Cargo.toml
+#   scripts/build-ppa-source.sh --test      # also build the .debs, offline
+#   scripts/build-ppa-source.sh --in-ubuntu # already in Ubuntu 26.04 (CI):
+#                                           # run the Ubuntu steps directly
+#
+# If packaging/debian/changelog has no entry for this version, the source
+# package gets a "New upstream release" entry <version>-1~ppa1, so a release
+# needs no packaging change. Add an entry by hand for anything else, such as
+# a packaging fix released as -1~ppa2.
 #
 # Output goes to target/ppa/. Launchpad builds without network access, so
 # the crates are bundled as a second tarball, laccy_<version>.orig-vendor.tar.xz.
-# Both tarballs are made once per version and reused after that: Launchpad
-# rejects a different tarball under a version it has already seen.
+# Both tarballs are made once per version, or taken from the PPA if it
+# already has that version: Launchpad rejects a different tarball under a
+# name it has already seen.
 #
-# Signing and uploading are left to you (see the end of this script's output).
+# Signing and uploading are left to you (see the end of this script's
+# output), or to .github/workflows/ppa.yml for releases.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,23 +27,48 @@ image=docker.io/library/ubuntu:26.04
 test_image=localhost/laccy-ppa-build:26.04
 
 test_build=false
-[[ ${1:-} == --test ]] && test_build=true
+in_ubuntu=false
+for arg in "$@"; do
+    case $arg in
+        --test) test_build=true ;;
+        --in-ubuntu) in_ubuntu=true ;;
+        *) echo "Unknown option $arg" >&2; exit 1 ;;
+    esac
+done
+$test_build && $in_ubuntu && { echo "--test needs podman; drop --in-ubuntu." >&2; exit 1; }
 
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n1)
 tag=v$version
 git -C "$root" rev-parse -q --verify "refs/tags/$tag" >/dev/null ||
     { echo "No tag $tag; release first." >&2; exit 1; }
 
-deb_version=$(sed -n '1s/^laccy (\([^)]*\)).*/\1/p' "$root/packaging/debian/changelog")
-[[ $deb_version == "$version"-* ]] ||
-    { echo "packaging/debian/changelog is at $deb_version, not $version; add an entry." >&2; exit 1; }
+changelog=$root/packaging/debian/changelog
+deb_version=$(sed -n '1s/^laccy (\([^)]*\)).*/\1/p' "$changelog")
+new_entry=false
+if [[ $deb_version != "$version"-* ]]; then
+    new_entry=true
+    deb_version=$version-1~ppa1
+fi
+tag_time=$(git -C "$root" log -1 --format=%ct "$tag")
 
 out=$root/target/ppa
 mkdir -p "$out"
 orig=$out/laccy_$version.orig.tar.xz
 vendor=$out/laccy_$version.orig-vendor.tar.xz
-tar_opts=(--sort=name --mtime="@$(git -C "$root" log -1 --format=%ct "$tag")"
+tar_opts=(--sort=name --mtime="@$tag_time"
     --owner=0 --group=0 --numeric-owner)
+
+# A version already in the PPA keeps its tarballs: Launchpad rejects new
+# ones under the same name, and the crates tarball isn't byte-for-byte
+# reproducible across cargo versions. So take them from the PPA if it has them.
+pool=https://ppa.launchpadcontent.net/mlkonrad/laccy/ubuntu/pool/main/l/laccy
+for file in "$orig" "$vendor"; do
+    if [[ ! -f $file ]] && curl -fsSL -o "$file.part" "$pool/$(basename "$file")"; then
+        mv "$file.part" "$file"
+        echo "Took $(basename "$file") from the PPA"
+    fi
+    rm -f "$file.part"
+done
 
 if [[ ! -f $orig ]]; then
     echo "Making $(basename "$orig") from $tag"
@@ -61,13 +95,30 @@ tar -C "$work" -xJf "$vendor"
 rm -rf "$work/debian"
 cp -r "$root/packaging/debian" "$work/debian"
 
-echo "Building the source package in $image"
-podman run --rm -v "$out:/build:z" -w "/build/laccy-$version" "$image" bash -euc '
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -qq -y --no-install-recommends dpkg-dev debhelper >/dev/null
-    dpkg-buildpackage -S -sa -d -us -uc
-'
+if $new_entry; then
+    # Signed off by whoever signed the newest entry, dated like the tag.
+    trailer=$(sed -n '0,/^ -- /s/^ -- \(.*>\)  .*/\1/p' "$changelog")
+    {
+        printf 'laccy (%s) resolute; urgency=medium\n\n' "$deb_version"
+        printf '  * New upstream release:\n'
+        printf '    https://github.com/mlkonrad/laccy/releases/tag/%s\n\n' "$tag"
+        printf ' -- %s  %s\n\n' "$trailer" "$(LC_ALL=C date -R -d "@$tag_time")"
+        cat "$changelog"
+    } >"$work/debian/changelog"
+    echo "Added changelog entry $deb_version"
+fi
+
+echo "Building the source package"
+if $in_ubuntu; then
+    (cd "$work" && dpkg-buildpackage -S -sa -d -us -uc)
+else
+    podman run --rm -v "$out:/build:z" -w "/build/laccy-$version" "$image" bash -euc '
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -qq -y --no-install-recommends dpkg-dev debhelper >/dev/null
+        dpkg-buildpackage -S -sa -d -us -uc
+    '
+fi
 
 if $test_build; then
     if ! podman image exists "$test_image"; then
