@@ -9,8 +9,6 @@
   <img alt="written in Rust" src="https://img.shields.io/badge/written_in-Rust-b7410e">
   <img alt="runs on GNOME, Niri, Hyprland and Sway" src="https://img.shields.io/badge/runs_on-GNOME_%C2%B7_Niri_%C2%B7_Hyprland_%C2%B7_Sway-4a86cf">
   <a href="https://github.com/mlkonrad/laccy/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/mlkonrad/laccy"></a>
-  <a href="https://aur.archlinux.org/packages/laccy"><img alt="AUR version" src="https://img.shields.io/aur/version/laccy"></a>
-  <a href="https://extensions.gnome.org/extension/11759/laccy/"><img alt="GNOME extension" src="https://img.shields.io/badge/GNOME-extension-4a86cf"></a>
   <img alt="history stays local" src="https://img.shields.io/badge/history-stays_local-2e7d32">
 </p>
 
@@ -21,7 +19,7 @@ GNOME, the clipboard icon in the top bar), type to search, press **Enter** to
 copy, then paste wherever you like.
 
 **[Install](#install):** [Fedora](#fedora-44-and-45) ·
-[Arch Linux](#arch-linux) · [Ubuntu](#ubuntu-2604) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
+[Arch Linux](#arch-linux) · [Ubuntu](#ubuntu-2604) · [openSUSE](#opensuse-tumbleweed) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
 [from source](#build-from-source)
 
 ![The Laccy popup with a pinned snippet, recent copies and an image in the preview, next to the preferences window](data/screenshots/hero.png)
@@ -83,6 +81,19 @@ This installs the app and the extension from the
 [PPA](https://launchpad.net/~mlkonrad/+archive/ubuntu/laccy). On Sway,
 Hyprland or Niri, install `laccy` alone. To get the extension from
 extensions.gnome.org instead, also install `laccy` alone.
+
+### openSUSE Tumbleweed
+
+```sh
+sudo zypper addrepo https://download.opensuse.org/repositories/home:mlkonrad/openSUSE_Tumbleweed/home:mlkonrad.repo
+sudo zypper install laccy
+```
+
+This installs the app from the
+[Open Build Service](https://build.opensuse.org/package/show/home:mlkonrad/laccy)
+and, if GNOME is installed, the extension too. To get the extension from
+extensions.gnome.org instead, install the app alone with
+`sudo zypper install --no-recommends laccy`.
 
 ### Other distributions
 
@@ -480,9 +491,9 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] RPM packages in COPR
 - [x] Arch Linux package in the AUR
 - [x] Ubuntu 26.04 packages in a PPA
+- [x] openSUSE Tumbleweed packages in the Open Build Service
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
 - [x] Sway, Hyprland, Niri and other Wayland compositors (experimental, `laccy-wayland`)
-- [ ] Flatpak packaging
 
 ## Support
 
