@@ -276,7 +276,10 @@ pub fn settings() -> Option<gio::Settings> {
 }
 
 /// Where GNOME Shell looks for the extension: the user's data dir first, then
-/// the system ones.
+/// the system ones. Last comes the folder that LACCY_SCHEMA_DIR named at
+/// build time, if any: the Nix package sets it, because Nix can't put the
+/// schema where GLib looks without wrapping the binaries in launcher
+/// scripts, and the D-Bus caller checks need the real binaries.
 fn extension_schema_dirs() -> Vec<PathBuf> {
     let data_dirs = std::env::var("XDG_DATA_DIRS")
         .ok()
@@ -285,6 +288,7 @@ fn extension_schema_dirs() -> Vec<PathBuf> {
     std::iter::once(crate::xdg_dir("XDG_DATA_HOME", ".local/share"))
         .chain(data_dirs.split(':').map(PathBuf::from))
         .map(|dir| dir.join("gnome-shell/extensions").join(EXTENSION_UUID).join("schemas"))
+        .chain(option_env!("LACCY_SCHEMA_DIR").map(PathBuf::from))
         .filter(|dir| dir.join("gschemas.compiled").is_file())
         .collect()
 }

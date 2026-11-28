@@ -25,7 +25,7 @@ GNOME, the clipboard icon in the top bar), type to search, press **Enter** to
 copy, then paste wherever you like.
 
 **[Install](#install):** [Fedora](#fedora-44-and-45) ·
-[Arch Linux](#arch-linux) · [Ubuntu](#ubuntu-2604) · [openSUSE](#opensuse-tumbleweed) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
+[Arch Linux](#arch-linux) · [Ubuntu](#ubuntu-2604) · [openSUSE](#opensuse-tumbleweed) · [NixOS](#nixos) · [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/) ·
 [from source](#build-from-source)
 
 ![The Laccy popup with a pinned snippet, recent copies and an image in the preview, next to the preferences window](data/screenshots/hero.png)
@@ -100,6 +100,37 @@ This installs the app from the
 and, if GNOME is installed, the extension too. To get the extension from
 extensions.gnome.org instead, install the app alone with
 `sudo zypper install --no-recommends laccy`.
+
+### NixOS
+
+Experimental. This repository is a Nix flake with two packages: `laccy` (the
+app) and `gnome-shell-extension-laccy`. Add it to your system flake:
+
+```nix
+inputs.laccy.url = "github:mlkonrad/laccy";
+inputs.laccy.inputs.nixpkgs.follows = "nixpkgs"; # build with your nixpkgs
+```
+
+and to your NixOS configuration:
+
+```nix
+{ inputs, pkgs, ... }:
+let
+  laccy = inputs.laccy.packages.${pkgs.stdenv.hostPlatform.system};
+in
+{
+  environment.systemPackages = [
+    laccy.laccy
+    laccy.gnome-shell-extension-laccy # on GNOME
+  ];
+  services.dbus.packages = [ laccy.laccy ]; # starts the history daemon
+  programs.dconf.enable = true; # saves the settings; GNOME turns it on already
+}
+```
+
+On GNOME, log in again and run `gnome-extensions enable laccy@mlkonrad.github.com`.
+On Sway, Hyprland or Niri, leave out the extension and see
+[Sway, Hyprland, Niri and other Wayland compositors](#sway-hyprland-niri-and-other-wayland-compositors).
 
 ### Other distributions
 
@@ -498,6 +529,7 @@ gsettings --schemadir ~/.local/share/gnome-shell/extensions/laccy@mlkonrad.githu
 - [x] Arch Linux package in the AUR
 - [x] Ubuntu 26.04 packages in a PPA
 - [x] openSUSE Tumbleweed packages in the Open Build Service
+- [x] NixOS flake (experimental)
 - [x] Extension released on [extensions.gnome.org](https://extensions.gnome.org/extension/11759/laccy/)
 - [x] Sway, Hyprland, Niri and other Wayland compositors (experimental, `laccy-wayland`)
 
