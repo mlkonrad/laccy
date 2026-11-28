@@ -59,6 +59,17 @@ and, if GNOME is installed, the extension too. To get the extension from
 extensions.gnome.org instead, install the app alone with
 `sudo dnf install --setopt=install_weak_deps=False laccy`.
 
+On Fedora Atomic desktops (Silverblue, Sway Atomic) and images built on
+them, such as Bazzite, add the COPR repository by hand and layer the
+package with rpm-ostree, then restart:
+
+```sh
+sudo curl -fsSL -o /etc/yum.repos.d/mlkonrad-laccy.repo \
+  "https://copr.fedorainfracloud.org/coprs/mlkonrad/laccy/repo/fedora-$(rpm -E %fedora)/mlkonrad-laccy-fedora-$(rpm -E %fedora).repo"
+rpm-ostree install laccy
+systemctl reboot
+```
+
 ### Arch Linux
 
 ```sh
