@@ -1,0 +1,103 @@
+# Uploads each release to the openSUSE Build Service (home:mlkonrad/laccy),
+# which then builds the Tumbleweed packages. It runs when a GitHub release
+# is published, like ppa.yml and Packit's COPR builds (.packit.yaml).
+#
+# Run it by hand (Actions -> OBS -> Run workflow) to test everything but the
+# upload: it makes the OBS files for the version in Cargo.toml from the
+# branch you pick, whose tag must exist, and shows how they differ from
+# what OBS has.
+#
+# OBS tokens can't upload files, so osc logs in with OBS_USER and
+# OBS_PASSWORD. The account needs maintainer rights on home:mlkonrad.
+name: OBS
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload to OBS and wait for the build
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  obs:
+    runs-on: ubuntu-latest
+    container: registry.opensuse.org/opensuse/tumbleweed:latest
+    steps:
+      - name: Install tools
+        run: |
+          zypper -n install --no-recommends osc git-core cargo curl tar gzip xz diffutils
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag matches Cargo.toml
+        if: github.event_name == 'release'
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "Release $GITHUB_REF_NAME, but Cargo.toml says $version" >&2
+            exit 1
+          fi
+
+      - name: Log in to OBS
+        env:
+          OBS_USER: ${{ secrets.OBS_USER }}
+          OBS_PASSWORD: ${{ secrets.OBS_PASSWORD }}
+        run: |
+          mkdir -p ~/.config/osc
+          cat >~/.config/osc/oscrc <<EOF
+          [general]
+          apiurl = https://api.opensuse.org
+
+          [https://api.opensuse.org]
+          user = $OBS_USER
+          pass = $OBS_PASSWORD
+          credentials_mgr_class = osc.credentials.PlaintextConfigFileCredentialsManager
+          EOF
+          chmod 600 ~/.config/osc/oscrc
+
+      - name: Make the OBS files
+        run: |
+          # The checkout belongs to the runner's user, not the container's root.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          osc checkout --output-dir "$RUNNER_TEMP/obs" home:mlkonrad laccy
+          scripts/build-obs-source.sh --obs-checkout "$RUNNER_TEMP/obs"
+          cp target/obs/laccy.spec target/obs/laccy.changes target/obs/vendor.tar.xz \
+            target/obs/laccy-*.tar.gz "$RUNNER_TEMP/obs/"
+          cd "$RUNNER_TEMP/obs"
+          # Tarballs of earlier versions go; addremove drops them from OBS.
+          version=$(sed -n 's/^Version: *//p' laccy.spec)
+          for f in laccy-*.tar.gz; do
+            [ "$f" = "laccy-$version.tar.gz" ] || rm "$f"
+          done
+          osc addremove
+          osc status
+          osc diff laccy.spec laccy.changes || true
+
+      - name: Upload
+        if: github.event_name == 'release' || inputs.upload
+        run: |
+          cd "$RUNNER_TEMP/obs"
+          version=$(sed -n 's/^Version: *//p' laccy.spec)
+          osc commit -m "Update to $version ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/v$version)"
+
+      - name: Wait for the build
+        if: github.event_name == 'release' || inputs.upload
+        timeout-minutes: 60
+        run: |
+          cd "$RUNNER_TEMP/obs"
+          # Give OBS a moment to schedule the new revision.
+          sleep 30
+          osc results --watch
+          if osc results | grep -vq 'succeeded\|disabled\|excluded'; then
+            osc results
+            osc buildlog openSUSE_Tumbleweed x86_64 | tail -n 100
+            exit 1
+          fi

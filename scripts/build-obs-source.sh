@@ -8,8 +8,15 @@
 #   scripts/build-obs-source.sh --test   also build the RPMs in an openSUSE
 #                                        Tumbleweed container with no
 #                                        network, like OBS, and run rpmlint
+#   scripts/build-obs-source.sh --obs-checkout DIR
+#                                        start from the package as it is on
+#                                        OBS (an osc checkout): its
+#                                        laccy.changes has the history, and
+#                                        its tarballs are reused if they are
+#                                        for this version
 #
-# Uploading is left to you (see the end of this script's output).
+# Uploading is left to you (see the end of this script's output), or to
+# .github/workflows/obs.yml for releases.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,11 +24,16 @@ image=registry.opensuse.org/opensuse/tumbleweed:latest
 test_image=localhost/laccy-obs-build:tumbleweed
 
 test_build=false
-for arg in "$@"; do
-    case $arg in
+checkout=
+while (($#)); do
+    case $1 in
         --test) test_build=true ;;
-        *) echo "Unknown option $arg" >&2; exit 1 ;;
+        --obs-checkout)
+            [[ $# -ge 2 && -d $2 ]] || { echo "--obs-checkout needs a directory" >&2; exit 1; }
+            checkout=$(cd "$2" && pwd); shift ;;
+        *) echo "Unknown option $1" >&2; exit 1 ;;
     esac
+    shift
 done
 
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -n1)
@@ -33,6 +45,17 @@ out=$root/target/obs
 mkdir -p "$out"
 tarball=$out/laccy-$version.tar.gz
 vendor=$out/vendor.tar.xz
+
+# Reuse the tarballs OBS already has for this version: the crates tarball
+# isn't byte-for-byte reproducible across cargo versions, and a new one
+# would only cause a rebuild.
+if [[ -n $checkout && -f $checkout/laccy-$version.tar.gz && -f $checkout/vendor.tar.xz ]] &&
+    grep -q "^Version: *$version\$" "$checkout/laccy.spec" 2>/dev/null; then
+    cp "$checkout/laccy-$version.tar.gz" "$tarball"
+    cp "$checkout/vendor.tar.xz" "$vendor"
+    echo "$version" >"$vendor.version"
+    echo "Took the tarballs for $version from $checkout"
+fi
 
 # The tarball GitHub serves for the tag, so it matches the spec's Source0 URL.
 if [[ ! -f $tarball ]]; then
@@ -63,6 +86,7 @@ echo "Wrote laccy.spec for $version"
 # OBS turns laccy.changes into the RPM's %changelog. A version without an
 # entry gets one pointing to its release notes, dated like the tag.
 changes=$root/packaging/opensuse/laccy.changes
+[[ -n $checkout && -f $checkout/laccy.changes ]] && changes=$checkout/laccy.changes
 if grep -q "version $version:\$\|Update to $version:\$" "$changes"; then
     cp "$changes" "$out/laccy.changes"
 else
