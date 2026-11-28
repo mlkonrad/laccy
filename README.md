@@ -11,6 +11,12 @@
   <a href="https://github.com/mlkonrad/laccy/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/mlkonrad/laccy"></a>
   <img alt="history stays local" src="https://img.shields.io/badge/history-stays_local-2e7d32">
 </p>
+<p align="center">
+  <a href="#fedora-44-and-45"><img alt="Fedora: COPR" src="https://img.shields.io/badge/Fedora-COPR-51A2DA?logo=fedora&logoColor=white"></a>
+  <a href="#ubuntu-2604"><img alt="Ubuntu: PPA" src="https://img.shields.io/badge/Ubuntu-PPA-E95420?logo=ubuntu&logoColor=white"></a>
+  <a href="#arch-linux"><img alt="Arch Linux: AUR" src="https://img.shields.io/badge/Arch_Linux-AUR-1793D1?logo=archlinux&logoColor=white"></a>
+  <a href="#opensuse-tumbleweed"><img alt="openSUSE: OBS" src="https://img.shields.io/badge/openSUSE-OBS-73BA25?logo=opensuse&logoColor=white"></a>
+</p>
 
 A lightweight, keyboard-first clipboard manager for GNOME and for Wayland
 compositors such as Niri, Hyprland and Sway, inspired by
